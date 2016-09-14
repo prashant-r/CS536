@@ -1,4 +1,4 @@
-#define _XOPEN_SOURCE
+#define _DEFAULT_SOURCE
 
 #include <stdio.h>
 #include <unistd.h>
@@ -11,6 +11,8 @@
 #include <signal.h>
 #include <stdint.h>
 #include <stdint.h>
+
+
 int main(int argc, char **argv){
 
 	if( argc == 3 ) {
@@ -25,7 +27,7 @@ int main(int argc, char **argv){
 		return -1;
 	}
 	//Read the first file
-	uint64_t check_sum =0;
+	unsigned long long check_sum =0;
 	int fd, fdw;
 	fd = open(argv[1], O_RDONLY);
 	fdw = open(argv[2], O_WRONLY | O_CREAT, S_IRUSR | S_IWUSR);
@@ -40,9 +42,7 @@ int main(int argc, char **argv){
 
 	check_sum = htobe64(check_sum);
 
-	char buf[8];
-	int c = snprintf(buf, 8, "%llu", check_sum);
-	write(fdw, buf, 8);
+	write(fdw, (void *)&check_sum, 8);
 	close(fd);
 	close(fdw);
 	_exit(fd);
