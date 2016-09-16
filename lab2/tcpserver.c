@@ -1,4 +1,4 @@
-#define _XOPEN_SOURCE
+#define _DEFAULT_SOURCE
 
 #include <stdio.h>
 #include <unistd.h>
@@ -9,82 +9,184 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <signal.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <arpa/inet.h>
+#include <sys/wait.h>
+
+
+typedef int bool;
+#define true 1
+#define false 0
+
+#define MAXIMUM_WAITING_CLIENTS 10
+
+#define MAX_BUF 1024
 
 void handle_sigchld(int sig);
-
 void handle_sigchld(int sig) {
 	int saved_errno = errno;
 	while (waitpid((pid_t)(-1), 0, WNOHANG|WUNTRACED) > 0) {}
 	errno = saved_errno;
 }
 
-int main()
+
+int setUpHalfAssociation(char * PORT);
+int setUpHalfAssociation(char * PORT)
 {
-	int client_to_server;
+	int halfAssociationSocketfd = -1;
+	struct addrinfo prepInfo;
+	struct addrinfo *availableSocketAddressesStructs;
 
-	char *myfifo = "/tmp/cmdfifo";
-	char *fcfifo = "/tmp/cfifo";
+	memset(&prepInfo, 0, sizeof prepInfo);
+	prepInfo.ai_family = AF_INET;
+	prepInfo.ai_socktype = SOCK_STREAM;
+	prepInfo.ai_flags = AI_PASSIVE;
 
-	char buf[BUFSIZ];
+	if ((getaddrinfo(NULL, PORT, &prepInfo, &availableSocketAddressesStructs)) != 0) {//If it fails...
+		return -1;
+	}
 
-	mkfifo(myfifo, 0666);
+	while( availableSocketAddressesStructs != NULL)
+	{
+		bool error = false;
 
-	client_to_server = open(myfifo, O_RDONLY);
+		if ((halfAssociationSocketfd = socket(availableSocketAddressesStructs->ai_family, availableSocketAddressesStructs->ai_socktype,
+				availableSocketAddressesStructs->ai_protocol)) == -1) {
+			error = true;
+		}
+		int t = 1;
+		if (setsockopt(halfAssociationSocketfd, SOL_SOCKET, SO_REUSEADDR, &t,sizeof(int)) == -1) {
+			exit(EXIT_FAILURE);
+		}
+
+		if (bind(halfAssociationSocketfd, availableSocketAddressesStructs->ai_addr, availableSocketAddressesStructs->ai_addrlen) == -1)
+		{
+			close(halfAssociationSocketfd);
+			error = true;
+		}
+
+		if(error)
+		{
+			availableSocketAddressesStructs = availableSocketAddressesStructs->ai_next;
+		}
+		else
+		{
+			break;
+		}
+	}
+	if (availableSocketAddressesStructs == NULL)  {
+		return -1;
+	}
+
+	freeaddrinfo(availableSocketAddressesStructs);
+	return halfAssociationSocketfd;
+}
+
+void validateCommandLineArguments(int argc, char * argv[]);
+void validateCommandLineArguments(int argc, char * argv[])
+{
+	if(argc != 3)
+	{
+		printf("Check arguments (expected 2 , got %d) - Usage hostname portnumber secretkey \n", argc);
+		exit(1);
+	}
+}
+
+
+int main(int argc, char * argv[])
+{
+
+
+	// Validate the command line arguments
+	validateCommandLineArguments(argc, argv);
+
+	int halfAssocSockfd;// socket file descriptor to create half association
+	int fullAssocSockfd;// socket file descriptor to create full association
+
+	halfAssocSockfd = setUpHalfAssociation(argv[1]);
+
+
+	char * secretKeyGiven = argv[2];
+
+	if(halfAssocSockfd == -1)
+	{
+		printf("\n Failed to set up half association \n");
+		return 2;
+	}
 
 	printf("Server ON.\n");
+
+	if (listen(halfAssocSockfd, MAXIMUM_WAITING_CLIENTS) == -1) {//If it fails...
+		close(halfAssocSockfd);
+		exit(EXIT_FAILURE);
+	}
+
+	char clientAddress[INET6_ADDRSTRLEN];
 	signal(SIGCHLD, handle_sigchld);
 	while (1)
 	{
-		read(client_to_server, buf, BUFSIZ);
-		if (strcmp("",buf)!=0)
+		socklen_t sin_size = sizeof clientAddress;
+		fullAssocSockfd = accept(halfAssocSockfd, (struct sockaddr *)&clientAddress, &sin_size);
+
+		if(fullAssocSockfd == -1)
 		{
-			int child;
-
-			if (!(child =fork()))
-			{
-				// this is the child process
-				printf("Received: %s\n", buf);
-
-				// Decode the message
-				char *saveptr;
-				char *pid, *command;
-				pid = strtok_r(buf, "$", &saveptr);
-				command = strtok_r(NULL, "$", &saveptr);
-
-
-				// Find the right cfifopid
-				char cwd[1024];
-				strcpy(cwd, fcfifo);
-				char src[1024], cfifopid[1024];
-				strcpy(src,  pid);
-				strcpy(cfifopid, cwd);
-				strcat(cfifopid, src);
-
-				// Do something with the message
-				int fw=open(cfifopid, O_APPEND|O_WRONLY);
-				dup2(fw,1);
-				if (strcmp(command, "ls") == 0)
-				{
-					if(execlp(command,command,NULL) == -1)
-					{
-
-					}
-					close(fw);
-				}
-				else /* default: */
-				{
-					printf("You have entered an invalid command");
-				}
-
-				exit(EXIT_SUCCESS);
-			}
+			close(fullAssocSockfd);
+			close(halfAssocSockfd);
+			exit(EXIT_FAILURE);
 		}
-		/* clean buf from any data */
-		memset(buf, 0, sizeof(buf));
+		int child;
+
+		if (!(child =fork()))
+		{
+			// this is the child process
+			close(halfAssocSockfd);
+
+			char buf[BUFSIZ];
+
+			// Read the response
+			int numReadBytes;
+			if ((numReadBytes = read(fullAssocSockfd, buf, sizeof(buf)-1)) > 0)
+			{
+				buf[numReadBytes] = '\0';
+			}
+
+			// Decode the message
+			char *saveptr;
+			char *secretKey, *command;
+			secretKey = strtok_r(buf, "$", &saveptr);
+			command = strtok_r(NULL, "$", &saveptr);
+
+			if(strcmp(secretKey, secretKeyGiven ) == 0)
+			{
+			if (strcmp(command, "ls") == 0)
+			{
+				dup2(fullAssocSockfd,STDOUT_FILENO);
+				close(fullAssocSockfd);
+				if(execlp(command,command,NULL) == -1)
+				{
+
+				}
+			}
+			else
+			{
+				printf("You have entered an invalid command \n");
+			}
+			}
+			else
+			{
+				printf("Invalid secret key \n");
+			}
+			exit(EXIT_SUCCESS);
+		}
+		close(fullAssocSockfd);
+
 	}
-
-	close(client_to_server);
-
-	unlink(myfifo);
-	return 0;
+	close(halfAssocSockfd);
+	return EXIT_SUCCESS;
 }
+
+
+
+

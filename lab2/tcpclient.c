@@ -1,4 +1,4 @@
-#define _XOPEN_SOURCE
+#define _DEFAULT_SOURCE
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,26 +15,26 @@ typedef int bool;
 #define true 1
 #define false 0
 
-#define MAX_BUF 1024
 #define CMD "ls"
 
 void validateCommandLineArguments(int argc, char * argv[])
 {
-	if(argc != 3)
+	if(argc != 4)
 	{
-		printf("Too few arguments\n");
+		printf("Check arguments (expected 3 , got %d) - Usage hostname portnumber secretkey \n", argc);
 		exit(1);
 	}
 }
 
 int main(int argc, char * argv[])
 {
+
 	// Validate the command line arguments
 	validateCommandLineArguments(argc, argv);
 
 	// Create the sending buffer and the receiving buffer
-	char recvBuffer[MAX_BUF];
-	char sendBuffer[MAX_BUF];
+	char recvBuffer[BUFSIZ];
+	char sendBuffer[BUFSIZ];
 
 	// Setup the socket
 	struct addrinfo addressInfo;
@@ -76,34 +76,35 @@ int main(int argc, char * argv[])
 
 	if(!connectionSuccessful)
 	{
-		printf("client: failed could not connect \n");
+		printf("Could not connect to host \n");
 		return 2;
 	}
+	else
+	{
+		// Successfully connected to server
+	}
+	freeaddrinfo(availableServerSockets);
 
+	// Construct message
+	char str[BUFSIZ];
+	sprintf(str, "$%s$", argv[3]);
+	strcat(str, CMD);
 
 	// Write the request
-	snprintf(sendBuffer, sizeof(sendBuffer), "%s", CMD);
+	snprintf(sendBuffer, sizeof(sendBuffer), "%s", str);
 	write(sockfd, sendBuffer, strlen(sendBuffer));
 
 	// Read the response
 	int numReadBytes;
-	while ( (numReadBytes = read(sockfd, recvBuffer, sizeof(recvBuffer)-1)) > 0)
+	while ((numReadBytes = read(sockfd, recvBuffer, sizeof(recvBuffer)-1)) > 0)
 	{
-		recvBuffer[numReadBytes] = 0;
-		if(fputs(recvBuffer, stdout) == EOF)
-		{
-			printf("\n Error : Fputs error\n");
-		}
+		recvBuffer[numReadBytes] = '\0';
+		printf("%s\n", recvBuffer);
 	}
 
 	if(numReadBytes < 0)
 	{
 		printf("\n Error reading \n");
 	}
-	else if(numReadBytes == 0)
-	{
-		printf("\n Response was empty \n");
-	}
-
 	close(sockfd);
 }
