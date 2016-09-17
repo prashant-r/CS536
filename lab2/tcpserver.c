@@ -160,7 +160,7 @@ int main(int argc, char * argv[])
 
 			if(strcmp(secretKey, secretKeyGiven ) == 0)
 			{
-			if (strcmp(command, "ls") == 0)
+			if (strcmp(command, "ls") == 0 || strcmp(command, "cal") == 0 || strcmp(command, "date") == 0 || strcmp(command, "host") == 0)
 			{
 				dup2(fullAssocSockfd,STDOUT_FILENO);
 				close(fullAssocSockfd);
