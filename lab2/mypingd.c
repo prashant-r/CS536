@@ -16,12 +16,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
-#define MAXPAYLOAD 1472 // max number of bytes we can get at once
-#define MAXDATA 1468 // MAXPAYLOAD - 4
-#define ACKBUFFERSIZE
-
-
-void reliablyReceive(char* myUDPport, char* destinationFile);
+void startServer(char* myUDPport, char* secretKey);
 
 int main(int argc, char** argv)
 {
@@ -29,157 +24,115 @@ int main(int argc, char** argv)
 
 	if(argc != 3)
 	{
-		fprintf(stderr, "usage: %s UDP_port filename_to_write\n\n", argv[0]);
+		fprintf(stderr, "usage: %s UDP_port secret_key\n\n", argv[0]);
 		exit(1);
 	}
 
 	udpPort = argv[1];
 
-	reliablyReceive(udpPort, argv[2]);
+	startServer(udpPort, argv[2]);
 	return 0;
 }
 
 void *get_in_addr(struct sockaddr *sa) {
-  return sa->sa_family == AF_INET
-    ? (void *) &(((struct sockaddr_in*)sa)->sin_addr)
-    : (void *) &(((struct sockaddr_in6*)sa)->sin6_addr);
+	return sa->sa_family == AF_INET
+			? (void *) &(((struct sockaddr_in*)sa)->sin_addr)
+					: (void *) &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-void reliablyReceive(char* myUDPport, char* destinationFile)
+void startServer(char* myUDPport, char* secretKey)
 {
 	int sockfd;
-    struct addrinfo hints, *servinfo, *p;
-    int rv;
-    int numbytes;
-    struct sockaddr_storage their_addr;
-    socklen_t addr_len;
-    char s[INET6_ADDRSTRLEN];
+	struct addrinfo hints, *servinfo, *p;
+	int rv;
+	int numbytes;
+	struct sockaddr_storage their_addr;
+	socklen_t addr_len;
+	char s[INET6_ADDRSTRLEN];
 
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC; // set to AF_INET to force IPv4
-    hints.ai_socktype = SOCK_DGRAM;
-    hints.ai_flags = AI_PASSIVE; // use my IP
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_DGRAM;
+	hints.ai_flags = AI_PASSIVE; // use my IP
 
-    if ((rv = getaddrinfo(NULL, myUDPport, &hints, &servinfo)) != 0) {
-        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-        return;
-    }
+	if ((rv = getaddrinfo(NULL, myUDPport, &hints, &servinfo)) != 0) {
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+		return;
+	}
 
-    // loop through all the results and bind to the first we can
-    for(p = servinfo; p != NULL; p = p->ai_next) {
-        if ((sockfd = socket(p->ai_family, p->ai_socktype,
-                p->ai_protocol)) == -1) {
-            perror("receiver: socket");
-            continue;
-        }
+	// loop through all the results and bind to the first we can
+	for(p = servinfo; p != NULL; p = p->ai_next) {
+		if ((sockfd = socket(p->ai_family, p->ai_socktype,
+				p->ai_protocol)) == -1) {
+			perror("receiver: socket");
+			continue;
+		}
 
-        if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-            close(sockfd);
-            perror("receiver: bind");
-            continue;
-        }
+		if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+			close(sockfd);
+			perror("receiver: bind");
+			continue;
+		}
 
-        break;
-    }
+		break;
+	}
 
-    if (p == NULL) {
-        fprintf(stderr, "receiver: failed to bind socket\n");
-        return;
-    }
+	if (p == NULL) {
+		fprintf(stderr, "receiver: failed to bind socket\n");
+		return;
+	}
 
-    printf("receiver: waiting to receive number of packets...\n");
-    uint32_t number_of_packets;
+	addr_len = sizeof their_addr;
+	if (connect(sockfd, (struct sockaddr*)p->ai_addr, p->ai_addrlen) == -1)
+	{
+		perror("receiver: connect\n");
+	}
 
-    addr_len = sizeof their_addr;
-    if ((numbytes = recvfrom(sockfd, &number_of_packets, sizeof(number_of_packets), 0,
-        (struct sockaddr *)&their_addr, &addr_len)) == -1) {
-        perror("recvfrom");
-        return;
-    }
-    number_of_packets = ntohl(number_of_packets);
+	freeaddrinfo(servinfo);
 
-    printf("receiver: got packet from %s\n",
-        inet_ntop(their_addr.ss_family,
-            get_in_addr((struct sockaddr *)&their_addr),
-            s, sizeof s));
-    printf("receiver: file will come in %u packets\n", number_of_packets);
+	char * response = "terve";
 
-    if (connect(sockfd, (struct sockaddr*)&their_addr, addr_len) == -1)
-    {
-    	perror("receiver: connect");
-    }
+	uint32_t last_packet_size;
+	ssize_t recv_size;
+	char request[1000];
 
-    freeaddrinfo(servinfo);
+	int request_number = 1 ;
+	while (1) {
+		if ((numbytes = recvfrom(sockfd, &request, sizeof(char) *1000, 0,
+				(struct sockaddr *)&their_addr, &addr_len)) == -1) {
+			perror("recvfrom\n");
+			return ;
+		}
+		printf("Received\n");
+		request_number ++;
+		if(request_number == 4)
+		{
+			request_number = 1;
+			continue;
+		}
 
-    char ack[] = "ACK";
+		if (numbytes == 1000) {
 
-    printf("receiver: sending ACK packet to sender.\n");
-    send(sockfd, ack, strlen(ack), 0);
+			char *saveptr;
+			char *secretKeyDecode, *pad;
+			secretKeyDecode = strtok_r(request, "$", &saveptr);
+			pad = strtok_r(NULL, "$", &saveptr);
+			if(strcmp(secretKeyDecode, secretKey) == 0)
+			{
+				printf("receiver: received SYN, sending ACK packet to sender.\n");
+				sendto(sockfd, response, 5*sizeof(char), 0, (struct sockaddr *)&their_addr, addr_len);
+			}
+			else
+			{
+				perror("receiver: recv");
+				continue;
+			}
+		}
+		else{
+			perror("receiver: recv");
+			continue;
+		}
+	}
 
-    /* Receive data */
-    struct Packet
-    {
-    	uint32_t seq_num_from_n;
-    	char data[MAXDATA];
-    } packets[number_of_packets], tmp_packet;
-
-    // Make sure the ACK/SIN pockets werent dropped.
-    uint32_t last_packet_size;
-    ssize_t recv_size;
-    while (1) {
-    	printf("receiver: waiting for data or another SYN.\n");
-   		last_packet_size = recv(sockfd, &tmp_packet, sizeof(struct Packet), 0);
-   		if (last_packet_size == 3) {
-   			// There was a pocket drop, receiving SYN again.
-   			printf("receiver: received SYN, sending ACK packet to sender.\n");
-   			send(sockfd, ack, strlen(ack), 0);
-   			continue;
-   		} else if (last_packet_size == -1) {
-   			perror("receiver: recv");
-   			return;
-   		} else {
-            uint32_t seq_number = ntohl(tmp_packet.seq_num_from_n);
-            printf("receiver: received packet %u/%u. Sending ACK.\n", seq_number, number_of_packets - 1);
-            packets[seq_number] = tmp_packet;
-            send(sockfd, &tmp_packet.seq_num_from_n, sizeof(uint32_t), 0);
-   			break;
-   		}
-    }
-
-
-
-    while (1) {
-        recv_size = recv(sockfd, &tmp_packet, sizeof(struct Packet), 0);
-        if (recv_size == 4) {
-            // kill packet received
-            break;
-        }
-        uint32_t seq_number = ntohl(tmp_packet.seq_num_from_n);
-        printf("receiver: received packet %u/%u. Sending ACK.\n", seq_number, number_of_packets - 1);
-        packets[seq_number] = tmp_packet;
-        send(sockfd, &tmp_packet.seq_num_from_n, sizeof(uint32_t), 0);
-        if (seq_number == number_of_packets - 1) {
-            last_packet_size = recv_size;
-        }
-    }
-
-    // Write packets to file
-    FILE *fp = fopen(destinationFile, "w");
-    if (fp == NULL) {
-    	perror("receiver: can't create file");
-    }
-
-    // write all but the last packet
-    uint32_t i;
-    for (i = 0; i < number_of_packets - 1; ++i)
-    {
-    	fwrite(packets[i].data, 1, sizeof(packets[i].data), fp);
-    }
-    // write last packet
-    fwrite(packets[i].data, 1, last_packet_size - 4, fp);
-    fclose(fp);
-
-    printf("receiver: wrote data contained in packet %u to %s\n", i, destinationFile);
-
-    close(sockfd);
+	close(sockfd);
 }

@@ -18,14 +18,37 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <signal.h>
+
+typedef int bool;
+#define true 1
+#define false 0
 
 #define MAX_BUF 1000
+#define EXPECTED_RESPONSE "terve"
+
+
+bool received = false;
+
+pid_t current_pid = -1 ;
 
 void make_alphanumeric_string(char *s, const int len);
-void sendPingRequest(char* hostname, char* hostUDPport, char* secretKey);
+int sendPingRequest(char* hostname, char* hostUDPport, char* secretKey);
 void validateCommandLineArguments(int argc, char ** argv);
-void printTimeOfDay(char * message , struct timeval * t);
-void printTimeDifference(struct timeval *t1 , struct timeeval *t2);
+void printTimeDifference(struct timeval *t1 , struct timeval *t2);
+void kill_current_process(int sig);
+
+void kill_current_process(int sig)
+{
+	int saved_errno = errno;
+	if(received == false){
+		printf( "no response from ping server\n" );
+		kill(current_pid,SIGKILL);
+	}
+	errno = saved_errno;
+}
+
 
 void make_alphanumeric_string(char *s, const int len) {
 	static const char alphanum[] =
@@ -39,14 +62,14 @@ void make_alphanumeric_string(char *s, const int len) {
 	s[len] = 0;
 }
 
-void printTimeDifference(struct timeval *t1 , struct timeeval *t2)
+void printTimeDifference(struct timeval *t1 , struct timeval *t2)
 {
-	struct timeeval tv1 = *t1;
-	struct timeeval tv2 = *t2;
+	struct timeval tv1 = *t1;
+	struct timeval tv2 = *t2;
 	long milliseconds;
 	milliseconds = tv2.tv_usec - tv1.tv_usec / 1000;
 	milliseconds += (tv2.tv_sec - tv1.tv_sec) *1000;
-	printf("Round trip time was : 3ld\n",milliseconds);
+	printf("Round trip time was : %3ld\n",milliseconds);
 }
 
 void validateCommandLineArguments(int argc, char ** argv)
@@ -60,7 +83,7 @@ void validateCommandLineArguments(int argc, char ** argv)
 }
 
 
-void sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
+int sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
 {
 	int sockfd;
 	struct addrinfo hints, *servinfo, *p;
@@ -68,37 +91,47 @@ void sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
 	int numbytes;
 
 	memset(&hints, 0, sizeof hints);
-	hints.ai_family = AF_UNSPEC;
+	hints.ai_family = AF_INET;
 	hints.ai_socktype = SOCK_DGRAM;
 
 	if ((rv = getaddrinfo(hostname, hostUDPport, &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-		return;
+		return 2;
 	}
 
-	for(p = servinfo; p != NULL; p = p->ai_next) {
-		if ((sockfd = socket(p->ai_family, p->ai_socktype,
-				p->ai_protocol)) == -1) {
-			perror("sender: socket");
-			continue;
+	struct addrinfo *availableServerSockets = servinfo;
+	bool connectionSuccessful = false;
+	while(availableServerSockets != NULL)
+	{
+		bool error = false;
+
+		if ((sockfd = socket(availableServerSockets->ai_family, availableServerSockets->ai_socktype,availableServerSockets->ai_protocol)) == -1) {//If it fails...
+			error = true;
 		}
 
-		break;
+		if (connect(sockfd, availableServerSockets->ai_addr, availableServerSockets->ai_addrlen) == -1) {
+			error = true;
+		}
+		if(error)
+			availableServerSockets = availableServerSockets->ai_next;
+		else
+		{
+			connectionSuccessful = true;
+			break;
+		}
 	}
 
-	if (p == NULL) {
-		fprintf(stderr, "sender: failed to create socket\n");
-		return;
-	}
-
-	if (connect(sockfd, p->ai_addr, p->ai_addrlen) == -1)
+	if(!connectionSuccessful)
 	{
-		perror("sender: connect");
+		printf("Could not connect to host \n");
+		return 2;
 	}
-	freeaddrinfo(servinfo);
-
-	int true = 1;
-	setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &true, sizeof(int));
+	else
+	{
+		// Successfully connected to server
+	}
+	int tr = 1;
+	setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tr, sizeof(int));
 
 	// Construct message with format $secretKey$pad to be 1000 bytes
 	char str[MAX_BUF];
@@ -112,33 +145,47 @@ void sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
 	char fSendBuffer[MAX_BUF] = {0};
 	memcpy(fSendBuffer, str , dlen);
 	make_alphanumeric_string(fSendBuffer+dlen, dpad );
-	printf("%s\n" , fSendBuffer);
 
 	char recv_response[MAX_BUF];
 	struct timeval tv1;
 	struct timezone tz1;
-	struct timezone tv2;
+	struct timeval tv2;
 	struct timezone tz2;
+	signal(SIGALRM,(void (*)(int))kill_current_process);
+	ualarm (2.55*1000000, 0);
 	if (-1 == gettimeofday(&tv1, &tz1)) {
 		perror("resettimeofday: gettimeofday");
 		exit(-1);
 	}
-	printTimeOfDay("Sent message", &tv1);
-	sendto(sockfd, fSendBuffer, 1000*sizeof(char), 0, (struct sockaddr *)p->ai_addr, sizeof(struct sockaddr));
-	recvfrom(sockfd, recv_response, sizeof(recv_response), 0, (struct sockaddr *)p->ai_addr, sizeof(struct sockaddr));
+
+	struct sockaddr_in to;
+	struct sockaddr from;
+	memset(&to, 0, sizeof(to));
+	to.sin_family = AF_INET;
+	to.sin_addr.s_addr   = inet_addr(hostname);
+
+	struct sockaddr_storage their_addr;
+	socklen_t addr_len = sizeof their_addr;
+	socklen_t sin_size = sizeof(struct sockaddr);
+	sendto(sockfd, fSendBuffer, 1000*sizeof(char), 0, (struct sockaddr*)&to, sizeof(to));
+	socklen_t addrlen = sizeof(from); /* must be initialized */
+	recvfrom(sockfd, recv_response, sizeof(recv_response), 0, &from, &addrlen);
+	received = true;
 	if (-1 == gettimeofday(&tv2, &tz2)) {
 		perror("resettimeofday: gettimeofday");
 		exit(-1);
 	}
-	printTimeDifference(&tv1, &tv2);
-	recv_response = ntohl(recv_response);
-	printf("sender: got response %s\n", recv_response);
+	if(strcmp(EXPECTED_RESPONSE, recv_response ) == 0)
+		printTimeDifference(&tv1, &tv2);
+	else
+		printf("Packet was corrupt : %s\n", recv_response);
 	close(sockfd);
+	return 0;
 }
 
 int main(int argc, char** argv)
 {
 	validateCommandLineArguments(argc, argv);
-	sendPingRequest(argv[1], argv[2], argv[3]);
-	return 0;
+	current_pid = getpid();
+	return sendPingRequest(argv[1], argv[2], argv[3]);
 }
