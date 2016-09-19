@@ -72,9 +72,9 @@ void printTimeDifference(struct timeval *t1 , struct timeval *t2)
 	struct timeval tv1 = *t1;
 	struct timeval tv2 = *t2;
 	long milliseconds;
-	milliseconds = tv2.tv_usec - tv1.tv_usec / 1000;
+	milliseconds = (tv2.tv_usec - tv1.tv_usec) / 1000;
 	milliseconds += (tv2.tv_sec - tv1.tv_sec) *1000;
-	printf("Round trip time was : %3ld\n",milliseconds);
+	printf("Round trip time was : %3ld ms\n",milliseconds);
 }
 
 void validateCommandLineArguments(int argc, char ** argv)
@@ -91,7 +91,7 @@ void validateCommandLineArguments(int argc, char ** argv)
 int sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
 {
 	int sockfd;
-	struct addrinfo hints, *servinfo, *p;
+	struct addrinfo hints, *servinfo;
 	int rv;
 	int numbytes;
 
@@ -111,10 +111,6 @@ int sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
 		bool error = false;
 
 		if ((sockfd = socket(availableServerSockets->ai_family, availableServerSockets->ai_socktype,availableServerSockets->ai_protocol)) == -1) {//If it fails...
-			error = true;
-		}
-
-		if (connect(sockfd, availableServerSockets->ai_addr, availableServerSockets->ai_addrlen) == -1) {
 			error = true;
 		}
 		if(error)
@@ -151,28 +147,24 @@ int sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
 	memcpy(fSendBuffer, str , dlen);
 	make_alphanumeric_string(fSendBuffer+dlen, dpad );
 
-	char recv_response[MAX_BUF];
+	char recv_response[6];
 	struct timeval tv1;
 	struct timezone tz1;
 	struct timeval tv2;
 	struct timezone tz2;
+	struct sockaddr from;
+	socklen_t addr_len = sizeof from;
+	socklen_t sin_size = sizeof(struct sockaddr);
 	signal(SIGALRM,(void (*)(int))kill_current_process);
 	ualarm (2.55*1000000, 0);
 	if (-1 == gettimeofday(&tv1, &tz1)) {
 		perror("resettimeofday: gettimeofday");
 		exit(-1);
 	}
-
-	struct sockaddr_in to;
-	struct sockaddr from;
-	memset(&to, 0, sizeof(to));
-	to.sin_family = AF_INET;
-	to.sin_addr.s_addr   = inet_addr(hostname);
-
-	struct sockaddr_storage their_addr;
-	socklen_t addr_len = sizeof their_addr;
-	socklen_t sin_size = sizeof(struct sockaddr);
-	sendto(sockfd, fSendBuffer, 1000*sizeof(char), 0, (struct sockaddr*)&to, sizeof(to));
+	if(sendto(sockfd, fSendBuffer, strlen(fSendBuffer), 0, availableServerSockets->ai_addr, availableServerSockets->ai_addrlen) == -1)
+	{
+		perror("sendto: failed\n");
+	}
 	socklen_t addrlen = sizeof(from); /* must be initialized */
 	recvfrom(sockfd, recv_response, sizeof(recv_response), 0, &from, &addrlen);
 	received = true;
@@ -180,6 +172,7 @@ int sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
 		perror("resettimeofday: gettimeofday");
 		exit(-1);
 	}
+	recv_response[5] = '\0';
 	if(strcmp(EXPECTED_RESPONSE, recv_response ) == 0)
 		printTimeDifference(&tv1, &tv2);
 	else

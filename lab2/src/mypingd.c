@@ -85,10 +85,7 @@ void startServer(char* myUDPport, char* secretKey)
 	}
 
 	addr_len = sizeof their_addr;
-	if (connect(sockfd, (struct sockaddr*)p->ai_addr, p->ai_addrlen) == -1)
-	{
-		perror("receiver: connect\n");
-	}
+	char request[1000];
 
 	freeaddrinfo(servinfo);
 
@@ -96,33 +93,39 @@ void startServer(char* myUDPport, char* secretKey)
 
 	uint32_t last_packet_size;
 	ssize_t recv_size;
-	char request[1000];
+
 
 	int request_number = 1 ;
 	while (1) {
-		if ((numbytes = recvfrom(sockfd, &request, sizeof(char) *1000, 0,
-				(struct sockaddr *)&their_addr, &addr_len)) == -1) {
-			perror("recvfrom\n");
-			return ;
+		struct sockaddr_storage new_addr;
+		socklen_t new_addr_len;
+		bzero((char *) request, sizeof(request));
+		printf("receiver: waiting for client connection \n");
+		if ((numbytes = recvfrom(sockfd, request, sizeof(request), 0,
+			        (struct sockaddr *)&their_addr, &addr_len)) == -1) {
+			        perror("recvfrom");
+			        return;
 		}
-		printf("Received\n");
-		request_number ++;
 		if(request_number == 4)
 		{
 			request_number = 1;
 			continue;
 		}
-
+		request_number ++;
 		if (numbytes == 1000) {
 
 			char *saveptr;
 			char *secretKeyDecode, *pad;
 			secretKeyDecode = strtok_r(request, "$", &saveptr);
 			pad = strtok_r(NULL, "$", &saveptr);
+
 			if(strcmp(secretKeyDecode, secretKey) == 0)
 			{
-				printf("receiver: received SYN, sending ACK packet to sender.\n");
-				sendto(sockfd, response, 5*sizeof(char), 0, (struct sockaddr *)&their_addr, addr_len);
+				int n;
+				n = sendto(sockfd, response, strlen(response), 0,
+					       (struct sockaddr *) &their_addr, addr_len);
+				if (n < 0)
+				   perror("ERROR in sendto\n");
 			}
 			else
 			{
