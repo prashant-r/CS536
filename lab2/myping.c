@@ -152,7 +152,7 @@ int sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
 	struct timezone tz1;
 	struct timeval tv2;
 	struct timezone tz2;
-	struct sockaddr from;
+	struct sockaddr_in from;
 	socklen_t addr_len = sizeof from;
 	socklen_t sin_size = sizeof(struct sockaddr);
 	signal(SIGALRM,(void (*)(int))kill_current_process);
@@ -166,17 +166,29 @@ int sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
 		perror("sendto: failed\n");
 	}
 	socklen_t addrlen = sizeof(from); /* must be initialized */
-	recvfrom(sockfd, recv_response, sizeof(recv_response), 0, &from, &addrlen);
+	recvfrom(sockfd, recv_response, sizeof(recv_response), 0, (struct sockaddr *)&from, &addrlen);
 	received = true;
 	if (-1 == gettimeofday(&tv2, &tz2)) {
 		perror("resettimeofday: gettimeofday");
 		exit(-1);
 	}
 	recv_response[5] = '\0';
+	struct hostent *hostp; /* server host info */
+	hostp = gethostbyaddr((const char *)&from.sin_addr.s_addr,
+			sizeof(from.sin_addr.s_addr), AF_INET);
+	if (hostp == NULL)
+		perror("ERROR on gethostbyaddr");
+	char *hostaddrp; /* dotted decimal server host addr string */
+	hostaddrp = inet_ntoa(from.sin_addr);
+	if (hostaddrp == NULL)
+		perror("ERROR on inet_ntoa\n");
 	if(strcmp(EXPECTED_RESPONSE, recv_response ) == 0)
+	{
 		printTimeDifference(&tv1, &tv2);
+	}
 	else
-		printf("Packet was corrupt : %s\n", recv_response);
+		printf("Packet received was corrupt : %s\n", recv_response);
+	printf("Client received datagram from %s (%s)\n",hostp->h_name, hostaddrp);
 	close(sockfd);
 	return 0;
 }

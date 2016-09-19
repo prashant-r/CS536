@@ -1,1 +1,0 @@
-myping.o: ../myping.c

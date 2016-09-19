@@ -2,7 +2,7 @@
 COMPILERFLAGS = -g -Wall -Wextra -Wno-sign-compare -Wno-unused-variable -Wno-unused-parameter
 
 #Any libraries you might need linked in.
-#LINKLIBS = -lm
+LINKLIBS = -lm
 
 SENDEROBJECTS1 = obj/myping.o
 RECEIVEROBJECTS1 = obj/mypingd.o
@@ -26,7 +26,7 @@ tcpclient: $(SENDEROBJECTS2)
 
 clean :
 	$(RM) -r obj/ myping mypingd tcpserver tcpclient output
-obj/%.o: src/%.c
+obj/%.o: %.c
 	$(CC) $(COMPILERFLAGS) -c -o $@ $<
 obj:
 	mkdir -p obj
