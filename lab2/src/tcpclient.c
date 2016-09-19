@@ -17,11 +17,12 @@ typedef int bool;
 
 #define CMD "ls"
 
+void validateCommandLineArguments(int argc, char * argv[]);
 void validateCommandLineArguments(int argc, char * argv[])
 {
 	if(argc != 4)
 	{
-		printf("Check arguments (expected 3 , got %d) - Usage hostname portnumber secretkey \n", argc);
+		printf("Check arguments (expected 3 , got %d) - Usage %s hostname portnumber secretkey \n",argc, argv[1]);
 		exit(1);
 	}
 }
@@ -52,7 +53,6 @@ int main(int argc, char * argv[])
 	}
 
 	int sockfd;
-	struct addrinfo *nextAvailableServerSocket;
 	bool connectionSuccessful = false;
 	while(availableServerSockets != NULL)
 	{
@@ -107,4 +107,5 @@ int main(int argc, char * argv[])
 		printf("\n Error reading \n");
 	}
 	close(sockfd);
+	return 0;
 }

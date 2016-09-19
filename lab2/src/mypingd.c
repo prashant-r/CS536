@@ -1,4 +1,6 @@
+#define _DEFAULT_SOURCE
 /*
+
  * myping.c
  *
  *  Created on: Sep 17, 2016

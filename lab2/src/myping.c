@@ -1,4 +1,8 @@
+#define _DEFAULT_SOURCE
+
 /*
+
+
  * mypingd.c
  *
  *  Created on: Sep 17, 2016
@@ -56,7 +60,8 @@ void make_alphanumeric_string(char *s, const int len) {
 			"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 			"abcdefghijklmnopqrstuvwxyz";
 
-	for (int i = 0; i < len; ++i) {
+	int i;
+	for ( i = 0; i < len; ++i) {
 		s[i] = alphanum[rand() % (sizeof(alphanum) - 1)];
 	}
 	s[len] = 0;
