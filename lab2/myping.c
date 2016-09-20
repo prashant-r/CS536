@@ -1,5 +1,3 @@
-#define _XOPEN_SOURCE
-
 /*
 
 
@@ -8,7 +6,7 @@
  *  Created on: Sep 17, 2016
  *      Author: prashantravi
  */
-
+#define _DEFAULT_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -31,22 +29,26 @@ typedef int bool;
 
 #define MAX_BUF 1000
 #define EXPECTED_RESPONSE "terve"
+#define TIME_OUT 550000
+#define INTERVAL 50000
 
-
-bool received = false;
-
+volatile bool received = false;
+volatile sig_atomic_t got_interrupt = 0;
 pid_t current_pid = -1 ;
 
 void make_alphanumeric_string(char *s, const int len);
 int sendPingRequest(char* hostname, char* hostUDPport, char* secretKey);
 void validateCommandLineArguments(int argc, char ** argv);
 void printTimeDifference(struct timeval *t1 , struct timeval *t2);
-void kill_current_process(int sig);
+void handle_signal_alarm(int sig);
 
-void kill_current_process(int sig)
+void handle_signal_alarm(int sig)
 {
 	int saved_errno = errno;
-	if(received == false){
+	if (sig != SIGALRM) {
+		perror("Caught wrong signal\n");
+	}
+	if(received == false && got_interrupt++ == 40){
 		printf( "no response from ping server\n" );
 		kill(current_pid,SIGKILL);
 	}
@@ -155,8 +157,8 @@ int sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
 	struct sockaddr_in from;
 	socklen_t addr_len = sizeof from;
 	socklen_t sin_size = sizeof(struct sockaddr);
-	signal(SIGALRM,(void (*)(int))kill_current_process);
-	ualarm (2.55*1000000, 0);
+	signal(SIGALRM, handle_signal_alarm);
+	ualarm(TIME_OUT,INTERVAL);
 	if (-1 == gettimeofday(&tv1, &tz1)) {
 		perror("resettimeofday: gettimeofday");
 		exit(-1);
@@ -190,7 +192,7 @@ int sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
 		printf("Packet received was corrupt : %s\n", recv_response);
 	printf("Client received datagram from %s (%s)\n",hostp->h_name, hostaddrp);
 	close(sockfd);
-	return 0;
+	return EXIT_SUCCESS;
 }
 
 int main(int argc, char** argv)
