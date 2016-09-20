@@ -1,4 +1,4 @@
-#define _DEFAULT_SOURCE
+#define _XOPEN_SOURCE
 /*
 
  * myping.c
