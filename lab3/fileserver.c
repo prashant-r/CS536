@@ -29,7 +29,6 @@ void handle_sigchld(int sig) {
 	errno = saved_errno;
 }
 
-
 int setUpHalfAssociation(char * PORT);
 int setUpHalfAssociation(char * PORT)
 {
@@ -85,13 +84,44 @@ int setUpHalfAssociation(char * PORT)
 void validateCommandLineArguments(int argc, char * argv[]);
 void validateCommandLineArguments(int argc, char * argv[])
 {
-	if(argc != 3)
+	if(argc != 4)
 	{
-		printf("Check arguments (expected 2 , got %d) - Usage hostname portnumber secretkey \n", argc);
+		printf("Check number of arguments (expected 3 , got %d) - Usage portnumber secretkey configfile.dat\n", argc);
 		exit(1);
 	}
 }
 
+void validateConfigFile(char * filename);
+void validateConfigFile(char * filename)
+{
+
+	FILE * fp;
+	fp = fopen (filename, "r");
+	rewind(fp);
+	fscanf(fp, "%d", &MAX_DATA_AT_ONCE);
+	fclose(fp);
+	NUMPACKETS = (FILE_SIZE_IN_BYTES + MAX_DATA_AT_ONCE - 1) / MAX_DATA_AT_ONCE;
+}
+
+void validateSecretKey(char * secretKey);
+void validateSecretKey(char * secretKey)
+{
+	size_t secretKey_len = strlen(secretKey);
+
+	if(secretKey_len <10 || secretKey_len > 20 )
+	{
+		perror("Secret Key must be at least length 10 but not more than 20");
+		exit(1);
+	}
+	for (i=0; i <= secretKey_len;i++)
+	{
+		if (isascii(secretKey[i]) == 0 )
+		{
+			perror("Secret Key must be ASCII representable.");
+			exit(1);
+		}
+	}
+}
 
 int main(int argc, char * argv[])
 {
