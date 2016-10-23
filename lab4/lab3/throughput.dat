@@ -1,0 +1,11 @@
+# This file is called throughput.dat
+# Throughput vs Blocksize data for a file server-client pair
+      # BlockSize    Throughput  
+      0                0      
+      500              15.174                
+      1000             15.254            
+      1500             15.574            
+      2500             15.254            
+      3500             15.334            
+      4500             15.254            
+      5500             15.254
