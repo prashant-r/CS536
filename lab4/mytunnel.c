@@ -36,7 +36,8 @@ typedef int bool;
 volatile bool received = false;
 pid_t current_pid = -1 ;
 
-int sendMyTunnelRequest(char* hostname, char* hostUDPport);
+
+int sendMyTunnelRequest(char* hostname, char* hostUDPport, char *rserver_host , char * rserver_port);
 void validateCommandLineArguments(int argc, char ** argv);
 long getTimeDifference(struct timeval *t1 , struct timeval *t2);
 
@@ -54,8 +55,14 @@ void validateCommandLineArguments(int argc, char ** argv)
 
 */
 
+struct InfoPacket
+{
+   	char server_host[MAX_BUF];
+    char server_port[MAX_BUF];
+} packet;
 
-int sendMyTunnelRequest(char* hostname, char* hostUDPport)
+
+int sendMyTunnelRequest(char* hostname, char* hostUDPport, char *rserver_host , char * rserver_port)
 {
 
 	int sockfd;
@@ -103,7 +110,6 @@ int sendMyTunnelRequest(char* hostname, char* hostUDPport)
 		// Successfully connected to server
 	}
 	int tr = 1;
-	char recv_response[6];
 	struct sockaddr_in from;
 	socklen_t addr_len = sizeof from;
 	socklen_t sin_size = sizeof(struct sockaddr);
@@ -111,8 +117,11 @@ int sendMyTunnelRequest(char* hostname, char* hostUDPport)
 	int packets_sent = 0;
 	int packet_counter = 0;
 
+	strncpy(packet.server_host, rserver_host, sizeof(rserver_host) + 1);
+	strncpy(packet.server_port, rserver_port, sizeof(rserver_port) + 1);
+
 	// Send the packetCount number of packets of designated size
-	if((packets_sent = sendto(sockfd, payload, sizeof payload , 0, availableServerSockets->ai_addr, availableServerSockets->ai_addrlen)) == -1)
+	if((packets_sent = sendto(sockfd, &packet, sizeof packet , 0, availableServerSockets->ai_addr, availableServerSockets->ai_addrlen)) == -1)
 	{	
 		perror("sendto: failed\n");
 		exit(EXIT_FAILURE);
@@ -126,5 +135,5 @@ int main(int argc, char** argv)
 	// valdidate that the command line arguments are correct.
 	validateCommandLineArguments(argc, argv);
 	current_pid = getpid();
-	return sendMyTunnelRequest(argv[1], argv[2]);
+	return sendMyTunnelRequest(argv[1], argv[2], argv[3], argv[4]);
 }
