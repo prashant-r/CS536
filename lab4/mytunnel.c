@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <ctype.h>
 
 typedef int bool;
 #define true 1
@@ -55,13 +56,20 @@ void validateCommandLineArguments(int argc, char ** argv)
 
 */
 
+bool isnumber(const char*s);
+
+
 struct InfoPacket
 {
    	char server_host[MAX_BUF];
     char server_port[MAX_BUF];
 } packet;
 
-
+bool isnumber(const char*s) {
+   char* e = NULL;
+   (void) strtol(s, &e, 0);
+   return e != NULL && *e == (char)0;
+}
 int sendMyTunnelRequest(char* hostname, char* hostUDPport, char *rserver_host , char * rserver_port)
 {
 
@@ -113,6 +121,8 @@ int sendMyTunnelRequest(char* hostname, char* hostUDPport, char *rserver_host , 
 	struct sockaddr_in from;
 	socklen_t addr_len = sizeof from;
 	socklen_t sin_size = sizeof(struct sockaddr);
+	socklen_t addrlen = sizeof(from); /* must be initialized */
+	char recv_response[13];
 
 	int packets_sent = 0;
 	int packet_counter = 0;
@@ -127,7 +137,29 @@ int sendMyTunnelRequest(char* hostname, char* hostUDPport, char *rserver_host , 
 		exit(EXIT_FAILURE);
 	}
 
-	// Account for the bytes in UDP header 
+	recvfrom(sockfd, recv_response, sizeof(recv_response), 0, (struct sockaddr *)&from, &addrlen);
+
+	struct hostent *hostp; /* server host info */
+	hostp = gethostbyaddr((const char *)&from.sin_addr.s_addr,
+			sizeof(from.sin_addr.s_addr), AF_INET);
+	if (hostp == NULL)
+		perror("ERROR on gethostbyaddr");
+	char *hostaddrp; /* dotted decimal server host addr string */
+	hostaddrp = inet_ntoa(from.sin_addr);
+
+
+	if(isnumber(recv_response ))
+	{
+		printf("Success! Make requests on port : %s\n", recv_response);
+	}
+	else
+	{
+		printf("Packet received was corrupt : %s\n", recv_response);
+	}
+	
+
+	if (hostaddrp == NULL)
+		perror("ERROR on inet_ntoa\n");
 	return EXIT_SUCCESS;
 }
 int main(int argc, char** argv)
