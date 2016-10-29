@@ -97,10 +97,9 @@ void handle_signal_alarm(int sig)
 		printf( "no response from wetalk server\n" );
 		connection = false;
 		opp_server_pointer = false;
+		received = true;
 		fflush(stdout);
 	}
-	else
-		received = true;
 	errno = saved_errno;
 }
 
