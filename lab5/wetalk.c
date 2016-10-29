@@ -29,6 +29,7 @@
 
 //gcc -o wetalk wetalk.c $(pkg-config --cflags --libs gtk+-2.0)
 
+
 void packet_handler();
 int startListeningOnPort(char * myUDPport);
 void startWeChatServer(char* myUDPport);
@@ -40,7 +41,8 @@ void empty_stdout_out();
 void refresh_stdout_out();
 char *get_in_addr(struct sockaddr *sa);
 int get_in_port(struct sockaddr * sa);
-void printfToMessageBar(__const char *__restrict __format);
+void printfToMyMessageBar(__const char *__restrict __format);
+void printfToTheirMessageBar(__const char *__restrict __format);
 
 #ifndef	INET4ADDRLEN
 #define	INET4ADDRLEN	sizeof(struct in_addr)
@@ -64,7 +66,8 @@ struct  hostent *hp, *gethostbyname();
 GtkBuilder *builder;
 GtkWidget * window;
 GtkWidget * button;
-GtkWidget * messageBar;
+GtkWidget * messageBar1;
+GtkWidget * messageBar2;
 GtkWidget *	textBar;
 
 pid_t current_pid = -1 ;
@@ -127,7 +130,7 @@ int main(int argc, char** argv)
 	// Widget : main window
 	window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	gtk_window_set_title(GTK_WINDOW(window), "WeTalk");
-	gtk_window_set_default_size(GTK_WINDOW(window), 300, 300);
+	gtk_window_set_default_size(GTK_WINDOW(window), 300, 500);
 	g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
 	GtkWidget *layout = gtk_fixed_new();
@@ -139,12 +142,16 @@ int main(int argc, char** argv)
 	gtk_widget_set_size_request(button, 90, 30);
 	g_signal_connect(G_OBJECT(button), "clicked", G_CALLBACK(buttonClickedEvent), NULL);
 
-	messageBar = gtk_label_new("");
-	gtk_widget_set_size_request(messageBar, 270, 200);
+	messageBar1 = gtk_label_new("");
+	gtk_widget_set_size_request(messageBar1, 290, 200);
 
-	gtk_fixed_put(GTK_FIXED(layout), textBar, 20, 250);
-	gtk_fixed_put(GTK_FIXED(layout), button, 300, 250);
-	gtk_fixed_put(GTK_FIXED(layout), messageBar, 20, 10);
+	messageBar2 = gtk_label_new("");
+	gtk_widget_set_size_request(messageBar2, 290, 200);
+
+	gtk_fixed_put(GTK_FIXED(layout), textBar, 10, 450);
+	gtk_fixed_put(GTK_FIXED(layout), button, 300, 450);
+	gtk_fixed_put(GTK_FIXED(layout), messageBar1, 10, 10);
+	gtk_fixed_put(GTK_FIXED(layout), messageBar2, 10, 145);
 
 	gtk_container_add(GTK_CONTAINER(window), layout);
 
@@ -177,7 +184,7 @@ void buttonClickedEvent(GtkWidget *w, gpointer p) {
 
 
 		sprintf(bufToSend, "%s \n", toProcess);
-		printfToMessageBar(bufToSend);
+		printfToMyMessageBar(bufToSend);
 
 		if (!connection)
 		{
@@ -199,6 +206,8 @@ void buttonClickedEvent(GtkWidget *w, gpointer p) {
 					{
 						perror("sendto KO: failed\n");
 					}
+					connection = false;
+					opp_server_pointer = NULL;
 				}
 				else
 				{
@@ -285,14 +294,25 @@ ILLEGAL_HOSTNAME_PORT:
 
 }
 
-void printfToMessageBar(__const char *__restrict __format)
+void printfToMyMessageBar(__const char *__restrict __format)
 {
 	char aux[500];
 	char msg[52] = {0};
-	strcpy(aux,gtk_label_get_text(GTK_LABEL(messageBar)));
+	strcpy(aux,gtk_label_get_text(GTK_LABEL(messageBar1)));
 	strncpy(msg, __format, strlen(__format));
 	strcat(aux,msg); 
-	gtk_label_set_text(GTK_LABEL(messageBar), aux);
+	gtk_label_set_text(GTK_LABEL(messageBar1), aux);
+}
+
+
+void printfToTheirMessageBar(__const char *__restrict __format)
+{
+	char aux[500];
+	char msg[52] = {0};
+	strcpy(aux,gtk_label_get_text(GTK_LABEL(messageBar2)));
+	strncpy(msg, __format, strlen(__format));
+	strcat(aux,msg); 
+	gtk_label_set_text(GTK_LABEL(messageBar2), aux);
 }
 
 // Start the traffic udp server
@@ -382,8 +402,7 @@ void packet_handler()
 				int opp_port =  ntohs(get_in_port((struct sockaddr *)&their_addr));
 				opp_server_pointer = (struct sockaddr_in *)&their_addr;
 	 			sprintf(buffToPrint, "| chat request from %s %d \n", opp_hostname , opp_port);
-	 			printfToMessageBar(buffToPrint);
-
+	 			printfToTheirMessageBar(buffToPrint);
 			}
 			if(!received)
 			{
@@ -396,8 +415,10 @@ void packet_handler()
 				else if (!strcmp(NKO_CHK, buf))
 				{
 					received = true;
+					connection = false;
+					opp_server_pointer = NULL;
 					sprintf(buffToPrint, "%s", "| doesn't want to chat \n");
-					printfToMessageBar(buffToPrint);
+					printfToTheirMessageBar(buffToPrint);
 				}
 			}
 		}
@@ -409,7 +430,7 @@ void packet_handler()
 				connection = false;
 				opp_server_pointer = NULL;
 				sprintf(buffToPrint, "%s", "| chat terminated \n");
-				printfToMessageBar(buffToPrint);
+				printfToTheirMessageBar(buffToPrint);
 			}
 			else if (strlen(buf) > 0 && buf[0] == 'D')
 			{
@@ -420,7 +441,7 @@ void packet_handler()
 				strcpy(final_string, first_string);     // copy to destination
 				strcat(final_string, second_string + 1); // append part of the second string
 				sprintf(buffToPrint, "| %s \n", final_string);
-				printfToMessageBar(buffToPrint);
+				printfToTheirMessageBar(buffToPrint);
 			}
 		}
 	}

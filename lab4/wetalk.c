@@ -239,6 +239,8 @@ void startWeChatServer(char* myUDPport)
 						{
 							perror("sendto KO: failed\n");
 						}
+						connection = false;
+						opp_server_pointer = NULL;
 					}
 					else
 					{
@@ -383,6 +385,7 @@ void packet_handler()
 			else if (!strcmp(NKO_CHK, buf))
 			{
 				received = true;
+				connection = false;
 				empty_stdout_out();
 				printf("%s\n?", "| doesn't want to chat");
 			}
