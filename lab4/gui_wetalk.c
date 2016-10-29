@@ -27,7 +27,7 @@
 #include <gtk/gtk.h>
 
 
-//gcc -o wetalk wetalk.c $(pkg-config --cflags --libs gtk+-2.0)
+//gcc -o gui_wetalk gui_wetalk.c $(pkg-config --cflags --libs gtk+-2.0)
 
 
 void packet_handler();
@@ -108,7 +108,7 @@ int main(int argc, char** argv)
 {
 	their_addr.sin_family = AF_INET;
 	addr_len = sizeof (their_addr);
-	
+
 	current_pid = getpid();
 
 	char* udpPort;
@@ -178,7 +178,7 @@ void buttonClickedEvent(GtkWidget *w, gpointer p) {
 
 	char bufToSend[52] = {0};
 	char toProcess[51] = {0};
- 	strncpy(toProcess, gtk_entry_get_text(GTK_ENTRY(textBar)), 51);
+	strncpy(toProcess, gtk_entry_get_text(GTK_ENTRY(textBar)), 51);
 	if (toProcess[0] != 0)
 	{
 
@@ -221,7 +221,7 @@ void buttonClickedEvent(GtkWidget *w, gpointer p) {
 					alive = false;
 					alarm(0);
 					close(sockfd);
-					kill(current_pid,SIGKILL);
+					kill(current_pid, SIGKILL);
 				}
 				else
 				{
@@ -298,9 +298,9 @@ void printfToMyMessageBar(__const char *__restrict __format)
 {
 	char aux[500];
 	char msg[52] = {0};
-	strcpy(aux,gtk_label_get_text(GTK_LABEL(messageBar1)));
+	strcpy(aux, gtk_label_get_text(GTK_LABEL(messageBar1)));
 	strncpy(msg, __format, strlen(__format));
-	strcat(aux,msg); 
+	strcat(aux, msg);
 	gtk_label_set_text(GTK_LABEL(messageBar1), aux);
 }
 
@@ -309,9 +309,9 @@ void printfToTheirMessageBar(__const char *__restrict __format)
 {
 	char aux[500];
 	char msg[52] = {0};
-	strcpy(aux,gtk_label_get_text(GTK_LABEL(messageBar2)));
+	strcpy(aux, gtk_label_get_text(GTK_LABEL(messageBar2)));
 	strncpy(msg, __format, strlen(__format));
-	strcat(aux,msg); 
+	strcat(aux, msg);
 	gtk_label_set_text(GTK_LABEL(messageBar2), aux);
 }
 
@@ -320,7 +320,7 @@ void startWeChatServer(char* myUDPport)
 {
 
 
-	
+
 	opp_server.sin_family = AF_INET;
 	// initalize the alarm stuff
 
@@ -401,10 +401,10 @@ void packet_handler()
 				char * opp_hostname = get_in_addr((struct sockaddr *)&their_addr);
 				int opp_port =  ntohs(get_in_port((struct sockaddr *)&their_addr));
 				opp_server_pointer = (struct sockaddr_in *)&their_addr;
-	 			sprintf(buffToPrint, "| chat request from %s %d \n", opp_hostname , opp_port);
-	 			printfToTheirMessageBar(buffToPrint);
+				sprintf(buffToPrint, "| chat request from %s %d \n", opp_hostname , opp_port);
+				printfToTheirMessageBar(buffToPrint);
 			}
-			if(!received)
+			if (!received)
 			{
 				if (!strcmp(OK_CHK, buf))
 				{
