@@ -1,8 +1,7 @@
 
 /*
 * tunneld.c
-*
-*  Created on: Sep 17, 2016
+* Created on: Sep 17, 2016
 *      Author: prashantravi
 */
 #include <stdio.h>
@@ -21,15 +20,11 @@
 
 #define MAX_BUF 1000
 
-struct sockaddr_storage their_addr;
-socklen_t addr_len;
-
-
 typedef int bool;
 #define true 1
 #define false 0
 
-void create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPport);
+int create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPport);
 size_t send_socket_data(int in_fd, int out_fd, struct sockaddr * their_addr);
 int create_socket_to_listen_on(int *rand_port);
 void startTunnelServer(char* myUDPport);
@@ -40,7 +35,7 @@ int main(int argc, char** argv)
 {
 	char* udpPort;
 
-	if(argc != 2)
+	if (argc != 2)
 	{
 		fprintf(stderr, "usage: %s vpn_port_number\n\n", argv[0]);
 		exit(1);
@@ -54,14 +49,14 @@ int main(int argc, char** argv)
 // Get the address if ipv4 or ipv6 although we only pertain with ipv4
 void *get_in_addr(struct sockaddr *sa) {
 	return sa->sa_family == AF_INET
-	? (void *) &(((struct sockaddr_in*)sa)->sin_addr)
-	: (void *) &(((struct sockaddr_in6*)sa)->sin6_addr);
+	       ? (void *) & (((struct sockaddr_in*)sa)->sin_addr)
+	       : (void *) & (((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
 int get_in_port(struct sockaddr * sa)
 {
 	return (int)(((struct sockaddr_in*)sa)->sin_port);
-} 
+}
 
 struct InfoPacket
 {
@@ -71,7 +66,7 @@ struct InfoPacket
 
 // Start the traffic udp server
 void startTunnelServer(char* myUDPport)
-{	
+{
 	int sockfd ;
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
@@ -86,31 +81,31 @@ void startTunnelServer(char* myUDPport)
 	if ((rv = getaddrinfo(NULL, myUDPport, &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
 		return;
-	}	
+	}
 
 	// loop through all the resultant server socket and bind to the first we can
-	for(p = servinfo; p != NULL; p = p->ai_next) {
+	for (p = servinfo; p != NULL; p = p->ai_next) {
 		if ((sockfd = socket(p->ai_family, p->ai_socktype,
-			p->ai_protocol)) == -1) {
+		                     p->ai_protocol)) == -1) {
 			perror("receiver: socket \n");
-		continue;
-	}
+			continue;
+		}
 
 
-	if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-		close(sockfd);
-		perror("receiver: bind \n");
-		continue;
-	}
+		if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+			close(sockfd);
+			perror("receiver: bind \n");
+			continue;
+		}
 
-	break;
+		break;
 	}
 	if (p == NULL) {
 		fprintf(stderr, "receiver: failed to bind socket\n");
 		return;
 	}
 
-	addr_len = sizeof their_addr;
+	
 	freeaddrinfo(servinfo);
 	registration_proc(sockfd);
 	exit(EXIT_SUCCESS);
@@ -119,23 +114,23 @@ void startTunnelServer(char* myUDPport)
 
 void registration_proc(int sockfd)
 {
-	
-	while (1) {
 
+	struct sockaddr_storage their_addr;
+	socklen_t addr_len ;
+	addr_len = sizeof their_addr;
+	while (1) {
 		int numbytes;
 		struct sockaddr_storage new_addr;
 		socklen_t new_addr_len;
 		// blocking call to receive the traffic sent by traffic_snd.
 		bzero(&packet, sizeof packet);
-
-		if ((numbytes = recvfrom(sockfd, &packet, sizeof packet, 0,(struct sockaddr *)&their_addr, &addr_len)) == -1) {
+		if ((numbytes = recvfrom(sockfd, &packet, sizeof packet, 0, (struct sockaddr *)&their_addr, &addr_len)) == -1) {
 			perror("recvfrom");
 			return;
 		}
-
 		struct sockaddr_in myaddr;
-		if(!fork())
-		{	
+		if (!fork())
+		{
 			int rand_port = 0;
 			int local_listen_sock = create_socket_to_listen_on(&rand_port);
 			// Let mytunnel know what port has been assigned
@@ -143,12 +138,15 @@ void registration_proc(int sockfd)
 			sprintf(response, "%d", rand_port);
 			int n;
 			n = sendto(sockfd, response, sizeof response, 0,
-					       (struct sockaddr *) &their_addr, addr_len);
+			           (struct sockaddr *) &their_addr, addr_len);
 			if (n < 0)
-			perror("ERROR in sendto\n");
-			create_send_server_socket_data(local_listen_sock, packet.server_ip, packet.server_port);
-			send_socket_data(local_listen_sock, sockfd, (struct sockaddr*) &their_addr);
-			close(sockfd);
+				perror("ERROR in sendto\n");
+			int lsockfd_r = create_send_server_socket_data(local_listen_sock, packet.server_ip, packet.server_port);
+
+			printf("Now send server data to client \n");
+			send_socket_data(lsockfd_r, sockfd, (struct sockaddr*) &their_addr);
+
+			close(lsockfd_r);
 			close(local_listen_sock);
 		}
 	}
@@ -158,7 +156,7 @@ void registration_proc(int sockfd)
 
 
 
-void create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPport)
+int create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPport)
 {
 	off_t orig;
 	int sockfd_r;
@@ -176,61 +174,64 @@ void create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPpo
 		return ;
 	}
 
-	// Setup socket. 
+	// Setup socket.
 	struct addrinfo *availableServerSockets = servinfo;
 	bool connectionSuccessful = false;
-	while(availableServerSockets != NULL)
+	while (availableServerSockets != NULL)
 	{
 		bool error = false;
 
-	if ((sockfd_r = socket(availableServerSockets->ai_family, availableServerSockets->ai_socktype,availableServerSockets->ai_protocol)) == -1) {//If it fails...
-		error = true;
+		if ((sockfd_r = socket(availableServerSockets->ai_family, availableServerSockets->ai_socktype, availableServerSockets->ai_protocol)) == -1) { //If it fails...
+			error = true;
+		}
+		if (error)
+			availableServerSockets = availableServerSockets->ai_next;
+		else
+		{
+			connectionSuccessful = true;
+			break;
+		}
 	}
-	if(error)
-		availableServerSockets = availableServerSockets->ai_next;
+
+	if (!connectionSuccessful)
+	{
+		// Connection was not successful.
+		printf("Could not connect to host \n");
+		return ;
+	}
 	else
 	{
-		connectionSuccessful = true;
-		break;
+		// Successfully connected to server
 	}
-}
-
-if(!connectionSuccessful)
-{
-	// Connection was not successful.
-	printf("Could not connect to host \n");
-	return ;
-}
-else
-{
-	// Successfully connected to server
-}
-send_socket_data(in_fd, sockfd_r, availableServerSockets->ai_addr);
-close(sockfd_r);
+	send_socket_data(in_fd, sockfd_r, availableServerSockets->ai_addr);
+	return sockfd_r;
 }
 
 
 size_t send_socket_data(int in_fd, int out_fd, struct sockaddr * their_addr)
 {
+
 	char buf[BUFSIZ];
 	size_t toRead, numRead, numSent, totSent;
+	socklen_t addr_len = sizeof (*their_addr);
 	while (1) {
-	toRead = BUFSIZ;
-
-	numRead = read(in_fd, buf, toRead);
-
-	//printf("%d \n", (int) numRead);
-	if (numRead == -1)
-		return -1;
-	if (numRead == 0)
-        break;                      /* EOF */
-
+		toRead = BUFSIZ;
+		printf(" waiting to hear back  \n");
+		if ((numRead = recvfrom(in_fd, buf, toRead, 0, (struct sockaddr *)their_addr, &addr_len)) == -1) {
+			perror("recvfrom");
+			return;
+		}
+		printf("%d \n", (int) numRead);
+		if (numRead == -1)
+			return -1;
+		if (numRead == 0)
+			break;                      /* EOF */
 		numSent = sendto(out_fd, buf, numRead , 0, their_addr, sizeof (struct sockaddr));
-	if (numSent == -1)
-		return -1;
-    if (numSent == 0)               /* Should never happen */
-	perror("sendfile: write() transferred 0 bytes \n");
-	totSent += numSent;
+		if (numSent == -1)
+			return -1;
+		if (numSent == 0)               /* Should never happen */
+			perror("sendfile: write() transferred 0 bytes \n");
+		totSent += numSent;
 	}
 	return totSent;
 
@@ -248,9 +249,9 @@ int create_socket_to_listen_on(int *rand_port)
 	server.sin_family = AF_INET;
 	server.sin_addr.s_addr = htonl(INADDR_ANY);
 	server.sin_port = htons(0);
-	sd = socket (AF_INET,SOCK_DGRAM,0);
+	sd = socket (AF_INET, SOCK_DGRAM, 0);
 	bind ( sd, (struct sockaddr *) &server, sizeof(server));
 	getsockname(sd, (struct sockaddr *) &foo, &len);
-    *rand_port = ntohs(foo.sin_port);
+	*rand_port = ntohs(foo.sin_port);
 	return sd;
 }
