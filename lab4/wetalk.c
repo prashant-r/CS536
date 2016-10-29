@@ -23,6 +23,8 @@
 #include <wait.h>
 #include <termios.h>
 #include <stdbool.h>
+#include <stdio_ext.h>
+
 
 void packet_handler();
 int startListeningOnPort(char * myUDPport);
@@ -30,19 +32,56 @@ void startWeChatServer(char* myUDPport);
 long getTimeDifference(struct timeval *t1 , struct timeval *t2);
 void handle_signal_alarm(int sig);
 bool isnumber(const char*s);
+void write_stdout_out();
+void empty_stdout_out();
+void refresh_stdout_out();
+char *get_in_addr(struct sockaddr *sa);
+int get_in_port(struct sockaddr * sa);
 
-bool connection = false;
-bool received = false;
-int got_interrupt = 0;
+#ifndef	INET4ADDRLEN
+#define	INET4ADDRLEN	sizeof(struct in_addr)
+#endif
+
+#define WANNATALK_CHK "WANNATALK"
+#define OK_CHK "OK"
+#define E_CHK "E"
+#define NKO_CHK "KO"
+
+#define NO_STATUS 1
+#define INITIATOR 2
+#define RECEIVER 3
+
+volatile bool connection = false;
+volatile bool received = false;
+char term_buf[51] = {0};
+
+volatile struct	sockaddr_in * opp_server_pointer = NULL;
+
+int sockfd;
+
+int get_in_port(struct sockaddr * sa)
+{
+	return (int)(((struct sockaddr_in*)sa)->sin_port);
+}
+
+
+
+struct sockaddr_in opp_server;
+
 void handle_signal_alarm(int sig)
 {
 	int saved_errno = errno;
 	if (sig != SIGALRM) {
 		perror("Caught wrong signal\n");
 	}
-	if(!received){
+	if (!received) {
 		printf( "no response from wetalk server\n" );
+		connection = false;
+		opp_server_pointer = false;
+		fflush(stdout);
 	}
+	else
+		received = false;
 	errno = saved_errno;
 }
 
@@ -61,143 +100,323 @@ int main(int argc, char** argv)
 	return 0;
 }
 // Get the address if ipv4 or ipv6 although we only pertain with ipv4
-void *get_in_addr(struct sockaddr *sa) {
-	return sa->sa_family == AF_INET
-	       ? (void *) & (((struct sockaddr_in*)sa)->sin_addr)
-	       : (void *) & (((struct sockaddr_in6*)sa)->sin6_addr);
+char *get_in_addr(struct sockaddr *sa) {
+ 	return (char *) inet_ntoa((((struct sockaddr_in*)sa)->sin_addr));
 }
 // Start the traffic udp server
 void startWeChatServer(char* myUDPport)
 {
-	
-	int sockfd;
 
+
+	struct  hostent *hp, *gethostbyname();
+	opp_server.sin_family = AF_INET;
 	// initalize the alarm stuff
 
-	signal(SIGALRM,(void (*)(int))handle_signal_alarm);
+	signal(SIGALRM, (void (*)(int))handle_signal_alarm);
 
 	// initialize the terminal stuff
 
 	static struct termios oldt, newt;
 
- 
-    tcgetattr( STDIN_FILENO, &oldt);
-    newt = oldt;
-    newt.c_lflag &= ~(ICANON|ECHO);          
-    tcsetattr( STDIN_FILENO, TCSANOW, &newt);
+
+	tcgetattr( STDIN_FILENO, &oldt);
+	newt = oldt;
+	newt.c_lflag &= ~(ICANON | ECHO);
+	tcsetattr( STDIN_FILENO, TCSANOW, &newt);
 
 	// initiate the packet handler stuff
 
 	struct sigaction sa;
 	memset(&sa, 0, sizeof(sa));
-	
+
 	sa.sa_sigaction = &packet_handler;
 	sa.sa_flags = SA_SIGINFO;
 
-	if(!((sigaction(SIGIO, &sa, NULL ) == 0) && (sigaction(SIGPOLL, &sa, NULL) == 0)))
+	if (!((sigaction(SIGIO, &sa, NULL ) == 0) && (sigaction(SIGPOLL, &sa, NULL) == 0)))
 	{
 		perror("Can't create signal action.");
 		exit(EXIT_FAILURE);
 	}
 
-	if((sockfd = startListeningOnPort(myUDPport)) < 0)
+	if (startListeningOnPort(myUDPport) < 0)
 	{
 		perror("Can't create socket.");
 		exit(EXIT_FAILURE);
 	}
+	int flags = 0;
 
+	if (-1 == (flags = fcntl(sockfd, F_GETFL, 0)))
+        flags = 0;
 
-	if(fcntl(sockfd, F_SETFL,  O_NONBLOCK) < 0)
+	if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0)
 	{
 		perror("Cant' make socket non blocking");
 		exit(EXIT_FAILURE);
 	}
 
-	if(fcntl(sockfd, F_SETFL, O_ASYNC) < 0)
+	if (-1 == (flags = fcntl(sockfd, F_GETFL, 0)))
+        flags = 0;
+
+	if (fcntl(sockfd, F_SETFL, flags | O_ASYNC) < 0)
 	{
 		perror("Can't make socket asynchronous");
 		exit(EXIT_FAILURE);
 	}
 
-	if(fcntl(sockfd, F_SETOWN, getpid()))
+	if (fcntl(sockfd, F_SETOWN, getpid()))
 	{
 		perror("Can't own the socket");
 		exit(EXIT_FAILURE);
 	}
-
-
-	printf("?\n");
-
-	while(1)
+	while (1)
 	{
 		char r;
-		char term_buf[51] ;
+		
 		int num_chars_read = 0;
-		while( (r = getchar()) != '\n' && num_chars_read <=50)
+		memset(term_buf, 0, sizeof term_buf);
+
+		if(connection)
 		{
-			if((r == 127 || r == 8) && num_chars_read >0)
+			printf(">");
+		}
+		else
+		{
+			printf("?");
+		}
+
+		while ( (r = getchar()) != '\n' && num_chars_read <= 50)
+		{
+			if ((r == 127 || r == 8) && num_chars_read > 0)
 			{
-				term_buf[num_chars_read--] = '\0';
+				fputc('\b',stdout);
+				fputc(' ',stdout);
+				term_buf[--num_chars_read] = '\0';
 			}
-			else
+			else if (isprint(r) && !(r == 127 || r == 8))
 			{
 				term_buf[num_chars_read++] = r ;
 			}
+
+			if(num_chars_read == 0)
+			{
+				memset(term_buf, 0, sizeof term_buf);
+			}
+			refresh_stdout_out();
 		}
 		term_buf[num_chars_read] = '\0';
-		if(!connection)
+		char toProcess[51] = {0};
+		strncpy(toProcess, term_buf, 51);
+		write_stdout_out();
+		
+		if (toProcess[0] != 0)
 		{
-			char *p;
-			char * hostname;
-			char * port;
-    		hostname = strtok(term_buf, " ");
-    		if(!hostname) continue; 
-    		port = strtok(NULL, ",");
-   		   	if(!port || !isnumber(port)) continue;
-
-   		   	// Make a connection
-   		   	char *wannatalk = "WANNATALK";
-   		   	if(sendto(sockfd, wannatalk, strlen(wannatalk), MSG_DONTWAIT , availableServerSockets->ai_addr, availableServerSockets->ai_addrlen) == -1)
+			if (!connection)
 			{
-				perror("sendto: failed\n");
+				if (opp_server_pointer != NULL)
+				{
+					if (!strcmp("c", toProcess))
+					{
+						char * OK = "OK";
+						if (sendto(sockfd, OK, strlen(OK), MSG_DONTWAIT , (struct sockaddr *) opp_server_pointer, sizeof(*opp_server_pointer)) == -1)
+						{
+							perror("sendto OK: failed\n");
+						}
+						connection = true;
+						printf(">");
+						
+					}
+					else if (!strcmp("n", toProcess))
+					{
+						char * KO = "KO\0";
+						if (sendto(sockfd, KO, strlen(KO), MSG_DONTWAIT , (struct sockaddr *) opp_server_pointer, sizeof(*opp_server_pointer)) == -1)
+						{
+							perror("sendto KO: failed\n");
+						}
+						printf("?");
+					}
+					else
+					{
+
+					}
+				}
+				else
+				{
+					if (!strcmp("q", toProcess))
+					{
+						break;
+					}
+					else
+					{
+						char *p;
+						char * hostname;
+						char * port;
+						hostname = strtok(toProcess, " ");
+						if (!hostname) goto ILLEGAL_HOSTNAME_PORT;
+						port = strtok(NULL, ",");
+						if (!port || !isnumber(port)) goto ILLEGAL_HOSTNAME_PORT;
+
+						// Make a connection
+						char *wannatalk = "WANNATALK";
+						hp = gethostbyname(hostname);
+						if (hp != NULL)
+						{
+							bcopy ( hp->h_addr, &(opp_server.sin_addr.s_addr), hp->h_length);
+							opp_server.sin_port = htons(atoi(port));
+							opp_server_pointer = &opp_server;
+							if (sendto(sockfd, wannatalk, strlen(wannatalk), MSG_DONTWAIT , (struct sockaddr *) &opp_server, sizeof(opp_server)) == -1)
+							{
+								perror("sendto wannatalk: failed\n");
+							}
+							received = false;
+							alarm(7);
+						}
+						else
+						{
+ILLEGAL_HOSTNAME_PORT:
+							printf("ERROR: Invalid wetalk peer. Usage : hostname port\n");
+							continue;
+						}
+					}
+				}
 			}
-			alarm(7);
-        }
-		else
-		{
-			printf("?\n");
+			else
+			{
+				if (opp_server_pointer != NULL)
+				{
+					if (!strcmp("e", toProcess))
+					{
+						char msg[1] = {0};
+						msg[0] = 'E';
+						if ( sendto(sockfd, msg, sizeof msg, 0, (struct sockaddr*)opp_server_pointer, sizeof(*opp_server_pointer)) == -1)
+						{
+							perror("sendto e: failed\n");
+						}
+						connection = false;
+						opp_server_pointer = NULL;
+						
+					}
+					else
+					{
+						char msg[ 52 ] = { 0 };
+						strcat(msg, "D" );
+						strcat(msg, toProcess);
+						if ( sendto(sockfd, msg, strlen(msg), 0, (struct sockaddr*)opp_server_pointer, sizeof(*opp_server_pointer)) == -1)
+						{
+							perror("sendto msg: failed\n");
+						}
+					}
+				}
+				else
+				{
+					printf("ERROR: Wetalk wrongly assumes connection.\n");
+				}
+			}
 		}
-	
-
-
-
 	}
-	
+	alarm(0);
+	tcsetattr( STDIN_FILENO, TCSANOW, &oldt);
 	close(sockfd);
+}
+
+void empty_stdout_out()
+{
+	fputs("\r", stdout);
+}
+
+void refresh_stdout_out()
+{
+	fputs("\r", stdout);
+	fprintf(stdout, "%s", term_buf);
+}
+
+void write_stdout_out()
+{
+	fputc('\n', stdout);
 }
 
 
 bool isnumber(const char*s) {
-   char* e = NULL;
-   (void) strtol(s, &e, 0);
-   return e != NULL && *e == (char)0;
+	char* e = NULL;
+	(void) strtol(s, &e, 0);
+	return e != NULL && *e == (char)0;
 }
 
 void packet_handler()
 {
+	char buf[52] = {0};
+	char s[INET4ADDRLEN];
+	int rc;
+	struct sockaddr_in their_addr;
+	their_addr.sin_family = AF_INET;
+	socklen_t addr_len = sizeof (their_addr);
+	while (1)
+	{
+		rc = recvfrom (sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&their_addr, &addr_len);
+		their_addr.sin_family = AF_INET;
+		if (rc <= 0)
+		{
+			break;
+		}
+		buf[rc] = '\0';
+		if (!connection)
+		{
+			if (!strcmp(WANNATALK_CHK, buf))
+			{
+				char * opp_hostname = get_in_addr((struct sockaddr *)&their_addr);
+				int opp_port =  get_in_port((struct sockaddr *)&their_addr);
+				opp_server_pointer = (struct sockaddr_in *)&their_addr;
+				printf("| chat request from %s %d \n?", opp_hostname , opp_port);
+				
+			}
+			else if (!strcmp(OK_CHK, buf))
+			{
+				received = true;
+				connection = true;
+				
+			}
+			else if (!strcmp(NKO_CHK, buf))
+			{
+				received = true;
+				printf("%s\n", "| doesn't want to chat");
+			}
+		}
+		else
+		{
+			if (!strcmp(E_CHK, buf))
+			{
+				connection = false;
+				opp_server_pointer = NULL;
+			}
+			else if (strlen(buf) > 0 && buf[0] == 'D')
+			{
 
-	printf("Packet handler was called . \n");
-
+				const char * first_string = "";
+				const char * second_string = buf;
+				char final_string[52];
+				strcpy(final_string, first_string);     // copy to destination
+				strcat(final_string, second_string + 1); // append part of the second string
+				empty_stdout_out();
+				printf("| %s", final_string);
+				int num_spaces_to_print = 55 - strlen(final_string);
+				// Overwrite previous characters
+				while(num_spaces_to_print-- >0)
+				{
+					printf(" ");
+				} 
+				printf("\n");
+				refresh_stdout_out();
+			}
+		}
+	}
 }
 
 int startListeningOnPort(char * myUDPport)
 {
-	int sockfd;
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
 	struct sockaddr_storage their_addr;
 	socklen_t addr_len;
-	char s[INET6_ADDRSTRLEN];
+	char s[INET4ADDRLEN];
 
 	memset(&hints, 0, sizeof hints);
 	hints.ai_family = AF_INET;
@@ -232,11 +451,6 @@ int startListeningOnPort(char * myUDPport)
 	}
 	freeaddrinfo(servinfo);
 	return sockfd;
-}
-
-void  establish_connection()
-{
-
 }
 
 
