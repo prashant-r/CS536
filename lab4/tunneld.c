@@ -25,7 +25,7 @@ typedef int bool;
 #define false 0
 
 int create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPport);
-size_t send_socket_data(int in_fd, int out_fd, struct sockaddr * their_addr);
+size_t send_socket_data(int in_fd, struct sockaddr * who_to_send_addr, struct sockaddr* who_to_recv_addr);
 int create_socket_to_listen_on(int *rand_port);
 void startTunnelServer(char* myUDPport);
 void registration_proc(int sockfd);
@@ -128,7 +128,6 @@ void registration_proc(int sockfd)
 			perror("recvfrom");
 			return;
 		}
-		struct sockaddr_in myaddr;
 		if (!fork())
 		{
 			int rand_port = 0;
@@ -137,16 +136,26 @@ void registration_proc(int sockfd)
 			char response[13];
 			sprintf(response, "%d", rand_port);
 			int n;
-			n = sendto(sockfd, response, sizeof response, 0,
+			n = sendto(local_listen_sock, response, sizeof response, 0,
 			           (struct sockaddr *) &their_addr, addr_len);
 			if (n < 0)
 				perror("ERROR in sendto\n");
-			int lsockfd_r = create_send_server_socket_data(local_listen_sock, packet.server_ip, packet.server_port);
+			printf("Now send client data to server \n");
 
-			printf("Now send server data to client \n");
-			send_socket_data(lsockfd_r, sockfd, (struct sockaddr*) &their_addr);
+			struct	sockaddr_in server;
+			struct  hostent *hp, *gethostbyname();
 
-			close(lsockfd_r);
+			server.sin_family = AF_INET;
+			hp = gethostbyname(packet.server_ip);
+			bcopy ( hp->h_addr, &(server.sin_addr.s_addr), hp->h_length);
+			server.sin_port = htons(atoi(packet.server_port));
+
+			struct sockaddr new_client_addr;
+			struct sockaddr * client_addr = &new_client_addr;
+
+			send_socket_data(local_listen_sock,(struct sockaddr*) &server, client_addr);
+			send_socket_data(local_listen_sock, client_addr, (struct sockaddr*) &server);
+
 			close(local_listen_sock);
 		}
 	}
@@ -154,70 +163,16 @@ void registration_proc(int sockfd)
 	exit(EXIT_SUCCESS);
 }
 
-
-
-int create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPport)
-{
-	off_t orig;
-	int sockfd_r;
-	struct addrinfo hints, *servinfo;
-	int rv;
-	int numbytes;
-
-	memset(&hints, 0, sizeof hints);
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_DGRAM;
-
-
-	if ((rv = getaddrinfo(hostname, hostUDPport, &hints, &servinfo)) != 0) {
-		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-		return ;
-	}
-
-	// Setup socket.
-	struct addrinfo *availableServerSockets = servinfo;
-	bool connectionSuccessful = false;
-	while (availableServerSockets != NULL)
-	{
-		bool error = false;
-
-		if ((sockfd_r = socket(availableServerSockets->ai_family, availableServerSockets->ai_socktype, availableServerSockets->ai_protocol)) == -1) { //If it fails...
-			error = true;
-		}
-		if (error)
-			availableServerSockets = availableServerSockets->ai_next;
-		else
-		{
-			connectionSuccessful = true;
-			break;
-		}
-	}
-
-	if (!connectionSuccessful)
-	{
-		// Connection was not successful.
-		printf("Could not connect to host \n");
-		return ;
-	}
-	else
-	{
-		// Successfully connected to server
-	}
-	send_socket_data(in_fd, sockfd_r, availableServerSockets->ai_addr);
-	return sockfd_r;
-}
-
-
-size_t send_socket_data(int in_fd, int out_fd, struct sockaddr * their_addr)
+size_t send_socket_data(int in_fd, struct sockaddr * who_to_send_addr, struct sockaddr* who_to_recv_addr)
 {
 
 	char buf[BUFSIZ];
 	size_t toRead, numRead, numSent, totSent;
-	socklen_t addr_len = sizeof (*their_addr);
+	socklen_t addr_len = sizeof (*who_to_recv_addr);
 	while (1) {
 		toRead = BUFSIZ;
 		printf(" waiting to hear back  \n");
-		if ((numRead = recvfrom(in_fd, buf, toRead, 0, (struct sockaddr *)their_addr, &addr_len)) == -1) {
+		if ((numRead = recvfrom(in_fd, buf, toRead, 0, who_to_recv_addr, &addr_len)) == -1) {
 			perror("recvfrom");
 			return;
 		}
@@ -226,7 +181,7 @@ size_t send_socket_data(int in_fd, int out_fd, struct sockaddr * their_addr)
 			return -1;
 		if (numRead == 0)
 			break;                      /* EOF */
-		numSent = sendto(out_fd, buf, numRead , 0, their_addr, sizeof (struct sockaddr));
+		numSent = sendto(in_fd, buf, numRead , 0, who_to_send_addr, addr_len);
 		if (numSent == -1)
 			return -1;
 		if (numSent == 0)               /* Should never happen */
