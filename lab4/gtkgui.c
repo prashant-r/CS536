@@ -16,6 +16,7 @@ void init_gui(int *argc, char **argv[]) {
     guint build_error = gtk_builder_add_from_file(builder, "chat_window.ui", NULL);
     
     login_window = gtk_builder_get_object(builder, "chat_window");
+    
     g_signal_connect(login_window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
     
     

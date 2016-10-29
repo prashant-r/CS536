@@ -42,6 +42,9 @@ int get_in_port(struct sockaddr * sa);
 #define	INET4ADDRLEN	sizeof(struct in_addr)
 #endif
 
+struct sockaddr_in their_addr;
+socklen_t addr_len;
+
 #define WANNATALK_CHK "WANNATALK"
 #define OK_CHK "OK"
 #define E_CHK "E"
@@ -107,7 +110,9 @@ char *get_in_addr(struct sockaddr *sa) {
 void startWeChatServer(char* myUDPport)
 {
 
-
+	their_addr.sin_family = AF_INET;
+	addr_len = sizeof (their_addr);
+	
 	struct  hostent *hp, *gethostbyname();
 	opp_server.sin_family = AF_INET;
 	// initalize the alarm stuff
@@ -177,13 +182,17 @@ void startWeChatServer(char* myUDPport)
 
 		if(connection)
 		{
+			empty_stdout_out();
 			printf(">");
+			fflush(stdout);
 		}
 		else
 		{
+			empty_stdout_out();
 			printf("?");
+			fflush(stdout);
 		}
-
+		
 		while ( (r = getchar()) != '\n' && num_chars_read <= 50)
 		{
 			if ((r == 127 || r == 8) && num_chars_read > 0)
@@ -222,8 +231,6 @@ void startWeChatServer(char* myUDPport)
 							perror("sendto OK: failed\n");
 						}
 						connection = true;
-						printf(">");
-						
 					}
 					else if (!strcmp("n", toProcess))
 					{
@@ -232,7 +239,6 @@ void startWeChatServer(char* myUDPport)
 						{
 							perror("sendto KO: failed\n");
 						}
-						printf("?");
 					}
 					else
 					{
@@ -346,9 +352,6 @@ void packet_handler()
 	char buf[52] = {0};
 	char s[INET4ADDRLEN];
 	int rc;
-	struct sockaddr_in their_addr;
-	their_addr.sin_family = AF_INET;
-	socklen_t addr_len = sizeof (their_addr);
 	while (1)
 	{
 		rc = recvfrom (sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&their_addr, &addr_len);
@@ -365,6 +368,7 @@ void packet_handler()
 				char * opp_hostname = get_in_addr((struct sockaddr *)&their_addr);
 				int opp_port =  get_in_port((struct sockaddr *)&their_addr);
 				opp_server_pointer = (struct sockaddr_in *)&their_addr;
+				empty_stdout_out();
 				printf("| chat request from %s %d \n?", opp_hostname , opp_port);
 				
 			}
@@ -372,20 +376,25 @@ void packet_handler()
 			{
 				received = true;
 				connection = true;
+				empty_stdout_out();
+				printf(">");
 				
 			}
 			else if (!strcmp(NKO_CHK, buf))
 			{
 				received = true;
-				printf("%s\n", "| doesn't want to chat");
+				empty_stdout_out();
+				printf("%s\n?", "| doesn't want to chat");
 			}
 		}
 		else
 		{
 			if (!strcmp(E_CHK, buf))
 			{
+				
 				connection = false;
 				opp_server_pointer = NULL;
+				printf("%s\n?", "| chat terminated");
 			}
 			else if (strlen(buf) > 0 && buf[0] == 'D')
 			{
@@ -403,7 +412,7 @@ void packet_handler()
 				{
 					printf(" ");
 				} 
-				printf("\n");
+				printf("\n>");
 				refresh_stdout_out();
 			}
 		}
@@ -414,8 +423,6 @@ int startListeningOnPort(char * myUDPport)
 {
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
-	struct sockaddr_storage their_addr;
-	socklen_t addr_len;
 	char s[INET4ADDRLEN];
 
 	memset(&hints, 0, sizeof hints);
