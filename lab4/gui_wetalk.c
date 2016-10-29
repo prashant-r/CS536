@@ -26,9 +26,9 @@
 #include <stdio_ext.h>
 #include <gtk/gtk.h>
 
-
-//gcc -o gui_wetalk gui_wetalk.c $(pkg-config --cflags --libs gtk+-2.0)
-
+// Instructions: 
+// gcc -o gui_wetalk gui_wetalk.c $(pkg-config --cflags --libs gtk+-2.0)
+// follow same procedure as lab4 wetalk.c
 
 void packet_handler();
 int startListeningOnPort(char * myUDPport);

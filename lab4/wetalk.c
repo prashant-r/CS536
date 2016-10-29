@@ -55,7 +55,7 @@ socklen_t addr_len;
 #define RECEIVER 3
 
 volatile bool connection = false;
-volatile bool received = false;
+volatile bool received = true;
 char term_buf[51] = {0};
 
 volatile struct	sockaddr_in * opp_server_pointer = NULL;
@@ -78,13 +78,13 @@ void handle_signal_alarm(int sig)
 		perror("Caught wrong signal\n");
 	}
 	if (!received) {
-		printf( "no response from wetalk server\n" );
+		empty_stdout_out();
+		printf( "Error: No response from wetalk peer !\n?");
+		received = true;
 		connection = false;
 		opp_server_pointer = false;
 		fflush(stdout);
 	}
-	else
-		received = false;
 	errno = saved_errno;
 }
 
@@ -104,7 +104,7 @@ int main(int argc, char** argv)
 }
 // Get the address if ipv4 or ipv6 although we only pertain with ipv4
 char *get_in_addr(struct sockaddr *sa) {
- 	return (char *) inet_ntoa((((struct sockaddr_in*)sa)->sin_addr));
+	return (char *) inet_ntoa((((struct sockaddr_in*)sa)->sin_addr));
 }
 // Start the traffic udp server
 void startWeChatServer(char* myUDPport)
@@ -112,7 +112,7 @@ void startWeChatServer(char* myUDPport)
 
 	their_addr.sin_family = AF_INET;
 	addr_len = sizeof (their_addr);
-	
+
 	struct  hostent *hp, *gethostbyname();
 	opp_server.sin_family = AF_INET;
 	// initalize the alarm stuff
@@ -151,7 +151,7 @@ void startWeChatServer(char* myUDPport)
 	int flags = 0;
 
 	if (-1 == (flags = fcntl(sockfd, F_GETFL, 0)))
-        flags = 0;
+		flags = 0;
 
 	if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0)
 	{
@@ -160,7 +160,7 @@ void startWeChatServer(char* myUDPport)
 	}
 
 	if (-1 == (flags = fcntl(sockfd, F_GETFL, 0)))
-        flags = 0;
+		flags = 0;
 
 	if (fcntl(sockfd, F_SETFL, flags | O_ASYNC) < 0)
 	{
@@ -176,11 +176,11 @@ void startWeChatServer(char* myUDPport)
 	while (1)
 	{
 		char r;
-		
+
 		int num_chars_read = 0;
 		memset(term_buf, 0, sizeof term_buf);
 
-		if(connection)
+		if (connection)
 		{
 			empty_stdout_out();
 			printf(">");
@@ -192,13 +192,13 @@ void startWeChatServer(char* myUDPport)
 			printf("?");
 			fflush(stdout);
 		}
-		
+
 		while ( (r = getchar()) != '\n' && num_chars_read <= 50)
 		{
 			if ((r == 127 || r == 8) && num_chars_read > 0)
 			{
-				fputc('\b',stdout);
-				fputc(' ',stdout);
+				fputc('\b', stdout);
+				fputc(' ', stdout);
 				term_buf[--num_chars_read] = '\0';
 			}
 			else if (isprint(r) && !(r == 127 || r == 8))
@@ -206,7 +206,7 @@ void startWeChatServer(char* myUDPport)
 				term_buf[num_chars_read++] = r ;
 			}
 
-			if(num_chars_read == 0)
+			if (num_chars_read == 0)
 			{
 				memset(term_buf, 0, sizeof term_buf);
 			}
@@ -216,7 +216,7 @@ void startWeChatServer(char* myUDPport)
 		char toProcess[51] = {0};
 		strncpy(toProcess, term_buf, 51);
 		write_stdout_out();
-		
+
 		if (toProcess[0] != 0)
 		{
 			if (!connection)
@@ -301,7 +301,7 @@ ILLEGAL_HOSTNAME_PORT:
 						}
 						connection = false;
 						opp_server_pointer = NULL;
-						
+
 					}
 					else
 					{
@@ -372,31 +372,36 @@ void packet_handler()
 				opp_server_pointer = (struct sockaddr_in *)&their_addr;
 				empty_stdout_out();
 				printf("| chat request from %s %d \n?", opp_hostname , opp_port);
-				
+
 			}
-			else if (!strcmp(OK_CHK, buf))
+			if (!received)
 			{
-				received = true;
-				connection = true;
-				empty_stdout_out();
-				printf(">");
-				
-			}
-			else if (!strcmp(NKO_CHK, buf))
-			{
-				received = true;
-				connection = false;
-				empty_stdout_out();
-				printf("%s\n?", "| doesn't want to chat");
+				if (!strcmp(OK_CHK, buf))
+				{
+					received = true;
+					connection = true;
+					empty_stdout_out();
+					printf(">");
+
+				}
+				else if (!strcmp(NKO_CHK, buf))
+				{
+					received = true;
+					connection = false;
+					opp_server_pointer = NULL;
+					empty_stdout_out();
+					printf("%s\n?", "| doesn't want to chat");
+				}
 			}
 		}
 		else
 		{
 			if (!strcmp(E_CHK, buf))
 			{
-				
+
 				connection = false;
 				opp_server_pointer = NULL;
+				empty_stdout_out();
 				printf("%s\n?", "| chat terminated");
 			}
 			else if (strlen(buf) > 0 && buf[0] == 'D')
@@ -411,10 +416,10 @@ void packet_handler()
 				printf("| %s", final_string);
 				int num_spaces_to_print = 55 - strlen(final_string);
 				// Overwrite previous characters
-				while(num_spaces_to_print-- >0)
+				while (num_spaces_to_print-- > 0)
 				{
 					printf(" ");
-				} 
+				}
 				printf("\n>");
 				refresh_stdout_out();
 			}
