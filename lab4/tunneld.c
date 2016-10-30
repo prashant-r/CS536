@@ -16,7 +16,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-
+#include <fcntl.h>
 
 #define MAX_BUF 1000
 
@@ -25,7 +25,7 @@ typedef int bool;
 #define false 0
 
 int create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPport);
-size_t send_socket_data(int in_fd, struct sockaddr * who_to_send_addr, struct sockaddr* who_to_recv_addr);
+size_t send_socket_data(int in_fd, struct sockaddr * server_addr);
 int create_socket_to_listen_on(int *rand_port);
 void startTunnelServer(char* myUDPport);
 void registration_proc(int sockfd);
@@ -47,12 +47,9 @@ int main(int argc, char** argv)
 	return 0;
 }
 // Get the address if ipv4 or ipv6 although we only pertain with ipv4
-void *get_in_addr(struct sockaddr *sa) {
-	return sa->sa_family == AF_INET
-	       ? (void *) & (((struct sockaddr_in*)sa)->sin_addr)
-	       : (void *) & (((struct sockaddr_in6*)sa)->sin6_addr);
+char *get_in_addr(struct sockaddr *sa) {
+	return (char *) inet_ntoa((((struct sockaddr_in*)sa)->sin_addr));
 }
-
 int get_in_port(struct sockaddr * sa)
 {
 	return (int)(((struct sockaddr_in*)sa)->sin_port);
@@ -140,7 +137,7 @@ void registration_proc(int sockfd)
 			           (struct sockaddr *) &their_addr, addr_len);
 			if (n < 0)
 				perror("ERROR in sendto\n");
-			printf("Now send client data to server \n");
+			//printf("Now send client data to server \n");
 
 			struct	sockaddr_in server;
 			struct  hostent *hp, *gethostbyname();
@@ -150,12 +147,9 @@ void registration_proc(int sockfd)
 			bcopy ( hp->h_addr, &(server.sin_addr.s_addr), hp->h_length);
 			server.sin_port = htons(atoi(packet.server_port));
 
-			struct sockaddr new_client_addr;
-			struct sockaddr * client_addr = &new_client_addr;
-
-			send_socket_data(local_listen_sock,(struct sockaddr*) &server, client_addr);
-			send_socket_data(local_listen_sock, client_addr, (struct sockaddr*) &server);
-
+			//printf("host name  %s | host port %d \n", packet.server_ip, ntohs(server.sin_port));
+			struct sockaddr * client_addr = NULL;
+			send_socket_data(local_listen_sock,(struct sockaddr*) &server);
 			close(local_listen_sock);
 		}
 	}
@@ -163,30 +157,76 @@ void registration_proc(int sockfd)
 	exit(EXIT_SUCCESS);
 }
 
-size_t send_socket_data(int in_fd, struct sockaddr * who_to_send_addr, struct sockaddr* who_to_recv_addr)
+size_t send_socket_data(int in_fd, struct sockaddr * server_addr)
 {
 
 	char buf[BUFSIZ];
 	size_t toRead, numRead, numSent, totSent;
-	socklen_t addr_len = sizeof (*who_to_recv_addr);
+	struct sockaddr recv_sock;
+	struct sockaddr test_recv_sock;
+	socklen_t addr_len = sizeof (recv_sock);
+	struct sockaddr * who_to_send_addr;
+	struct sockaddr* client_addr = NULL;
 	while (1) {
 		toRead = BUFSIZ;
-		printf(" waiting to hear back  \n");
-		if ((numRead = recvfrom(in_fd, buf, toRead, 0, who_to_recv_addr, &addr_len)) == -1) {
-			perror("recvfrom");
-			return;
+		if(client_addr == NULL)
+		{
+			numRead = recvfrom(in_fd, buf, toRead, 0, &recv_sock, &addr_len);
+
+			if(numRead == -1) continue;
+
+		//	printf("numread is %d\n", (int) numRead);
+			client_addr = &recv_sock;
+
+			char * opp_hostname = get_in_addr((struct sockaddr *)&recv_sock);
+			int opp_port =  ntohs(get_in_port((struct sockaddr *)&recv_sock));
+
+			char * opp_hostname_chk = get_in_addr((struct sockaddr *)server_addr);
+			int opp_port_chk =  ntohs(get_in_port((struct sockaddr *)server_addr));
+
+
+			// printf("LHS1 is %s %d \n", opp_hostname, opp_port);
+			// printf("RHS1 is %s %d \n", opp_hostname_chk, opp_port_chk);
+
+			if(!strcmp(opp_hostname, opp_hostname_chk) && opp_port == opp_port_chk)
+			{
+				printf("No client so server can't send to anyone. \n ");
+				client_addr = NULL;
+				continue;
+			}
+
+			who_to_send_addr = server_addr;
 		}
-		printf("%d \n", (int) numRead);
-		if (numRead == -1)
-			return -1;
-		if (numRead == 0)
-			break;                      /* EOF */
+		else
+		{
+			numRead = recvfrom(in_fd, buf, toRead, 0 , &test_recv_sock, &addr_len);
+			
+			if(numRead == -1) continue;
+
+//			printf("numread is %d\n", (int) numRead);
+			char * opp_hostname = get_in_addr((struct sockaddr *)&test_recv_sock);
+			int opp_port =  ntohs(get_in_port((struct sockaddr *)&test_recv_sock));
+
+			char * opp_hostname_chk = get_in_addr((struct sockaddr *)server_addr);
+			int opp_port_chk =  ntohs(get_in_port((struct sockaddr *)server_addr));
+
+
+			// printf("LHS2 is %s %d \n", opp_hostname, opp_port);
+			// printf("RHS2 is %s %d \n", opp_hostname_chk, opp_port_chk);
+
+			if(!strcmp(opp_hostname, opp_hostname_chk) && opp_port == opp_port_chk)
+			{
+	//			printf("who to send is client \n");
+				who_to_send_addr = client_addr;
+			}
+			else
+			{
+				//printf("who to send is server \n");
+				who_to_send_addr = server_addr;
+			}
+
+		}                 /* EOF */
 		numSent = sendto(in_fd, buf, numRead , 0, who_to_send_addr, addr_len);
-		if (numSent == -1)
-			return -1;
-		if (numSent == 0)               /* Should never happen */
-			perror("sendfile: write() transferred 0 bytes \n");
-		totSent += numSent;
 	}
 	return totSent;
 
@@ -208,5 +248,16 @@ int create_socket_to_listen_on(int *rand_port)
 	bind ( sd, (struct sockaddr *) &server, sizeof(server));
 	getsockname(sd, (struct sockaddr *) &foo, &len);
 	*rand_port = ntohs(foo.sin_port);
+	int sockfd = sd;
+	int flags = 0;
+
+	if (-1 == (flags = fcntl(sockfd, F_GETFL, 0)))
+		flags = 0;
+
+	if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0)
+	{
+		perror("Cant' make socket non blocking");
+		exit(EXIT_FAILURE);
+	}
 	return sd;
 }

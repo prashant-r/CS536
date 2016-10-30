@@ -127,8 +127,8 @@ int sendMyTunnelRequest(char* hostname, char* hostUDPport, char *rserver_host , 
 	int packets_sent = 0;
 	int packet_counter = 0;
 
-	strncpy(packet.server_host, rserver_host, sizeof(rserver_host) + 1);
-	strncpy(packet.server_port, rserver_port, sizeof(rserver_port) + 1);
+	strncpy(packet.server_host, rserver_host, sizeof(rserver_host));
+	strncpy(packet.server_port, rserver_port, sizeof(rserver_port));
 
 	// Send the packetCount number of packets of designated size
 	if((packets_sent = sendto(sockfd, &packet, sizeof packet , 0, availableServerSockets->ai_addr, availableServerSockets->ai_addrlen)) == -1)

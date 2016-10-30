@@ -1,4 +1,5 @@
 /*
+
  * myping.c
  *
  *  Created on: Sep 17, 2016
@@ -116,7 +117,9 @@ void startServer(char* myUDPport, char* secretKey)
 			char *secretKeyDecode, *pad;
 			secretKeyDecode = strtok_r(request, "$", &saveptr);
 			pad = strtok_r(NULL, "$", &saveptr);
-
+			printf("request %s \n", request);
+			printf("secretKeyDecode%s\n", secretKeyDecode);
+			printf("secretKey %s\n", secretKey);
 			if(strcmp(secretKeyDecode, secretKey) == 0)
 			{
 				int n;
@@ -124,18 +127,15 @@ void startServer(char* myUDPport, char* secretKey)
 					       (struct sockaddr *) &their_addr, addr_len);
 				if (n < 0)
 				   perror("ERROR in sendto\n");
-
-				n = sendto(sockfd, response, 0 , 0,
-					       (struct sockaddr *) &their_addr, addr_len);
 			}
 			else
 			{
-				perror("receiver: recv");
+				perror("receiver: secretKey doesn't match ");
 				continue;
 			}
 		}
 		else{
-			perror("receiver: recv");
+			perror("receiver: recv not 1000 bytes");
 			continue;
 		}
 	}

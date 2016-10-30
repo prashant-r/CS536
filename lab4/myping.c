@@ -1,4 +1,6 @@
 /*
+
+
  * mypingd.c
  *
  *  Created on: Sep 17, 2016
@@ -162,10 +164,6 @@ int sendPingRequest(char* hostname, char* hostUDPport, char* secretKey)
 		exit(-1);
 	}
 	if(sendto(sockfd, fSendBuffer, strlen(fSendBuffer), 0, availableServerSockets->ai_addr, availableServerSockets->ai_addrlen) == -1)
-	{
-		perror("sendto: failed\n");
-	}
-	if(sendto(sockfd, fSendBuffer, 0, 0, availableServerSockets->ai_addr, availableServerSockets->ai_addrlen) == -1)
 	{
 		perror("sendto: failed\n");
 	}
