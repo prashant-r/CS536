@@ -117,9 +117,9 @@ void startServer(char* myUDPport, char* secretKey)
 			char *secretKeyDecode, *pad;
 			secretKeyDecode = strtok_r(request, "$", &saveptr);
 			pad = strtok_r(NULL, "$", &saveptr);
-			printf("request %s \n", request);
-			printf("secretKeyDecode%s\n", secretKeyDecode);
-			printf("secretKey %s\n", secretKey);
+			//printf("request %s \n", request);
+			//printf("secretKeyDecode%s\n", secretKeyDecode);
+			//printf("secretKey %s\n", secretKey);
 			if(strcmp(secretKeyDecode, secretKey) == 0)
 			{
 				int n;

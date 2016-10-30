@@ -122,13 +122,18 @@ int sendMyTunnelRequest(char* hostname, char* hostUDPport, char *rserver_host , 
 	socklen_t addr_len = sizeof from;
 	socklen_t sin_size = sizeof(struct sockaddr);
 	socklen_t addrlen = sizeof(from); /* must be initialized */
+
+
 	char recv_response[13];
 
 	int packets_sent = 0;
 	int packet_counter = 0;
 
-	strncpy(packet.server_host, rserver_host, sizeof(rserver_host));
-	strncpy(packet.server_port, rserver_port, sizeof(rserver_port));
+
+	strcpy(packet.server_host, rserver_host);
+	strcpy(packet.server_port, rserver_port);
+
+	//printf("rserver_host %s %lu , rserver_port %s %lu \n", packet.server_host,sizeof(packet.server_host), packet.server_port, sizeof(packet.server_port));
 
 	// Send the packetCount number of packets of designated size
 	if((packets_sent = sendto(sockfd, &packet, sizeof packet , 0, availableServerSockets->ai_addr, availableServerSockets->ai_addrlen)) == -1)
@@ -150,7 +155,10 @@ int sendMyTunnelRequest(char* hostname, char* hostUDPport, char *rserver_host , 
 
 	if(isnumber(recv_response ))
 	{
-		printf("Success! Make requests on port : %s\n", recv_response);
+		if(atoi(recv_response) == -1)
+			printf("Failure! Probable cause: invalid server host provided. \n");
+		else
+			printf("Success! Make requests on port : %s\n", recv_response);
 	}
 	else
 	{

@@ -17,19 +17,24 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <fcntl.h>
+#include <signal.h>
+#include <stdbool.h>
 
 #define MAX_BUF 1000
-
-typedef int bool;
-#define true 1
-#define false 0
 
 int create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPport);
 size_t send_socket_data(int in_fd, struct sockaddr * server_addr);
 int create_socket_to_listen_on(int *rand_port);
 void startTunnelServer(char* myUDPport);
 void registration_proc(int sockfd);
+bool isValidIpAddress(char *ipAddress);
+void handle_sigchld(int sig);
 
+void handle_sigchld(int sig) {
+	int saved_errno = errno;
+	while (waitpid((pid_t)(-1), 0, WNOHANG|WUNTRACED) > 0) {}
+       errno = saved_errno;
+}
 
 int main(int argc, char** argv)
 {
@@ -108,13 +113,13 @@ void startTunnelServer(char* myUDPport)
 	exit(EXIT_SUCCESS);
 }
 
-
 void registration_proc(int sockfd)
 {
 
 	struct sockaddr_storage their_addr;
 	socklen_t addr_len ;
 	addr_len = sizeof their_addr;
+	signal(SIGCHLD, handle_sigchld);
 	while (1) {
 		int numbytes;
 		struct sockaddr_storage new_addr;
@@ -130,27 +135,51 @@ void registration_proc(int sockfd)
 			int rand_port = 0;
 			int local_listen_sock = create_socket_to_listen_on(&rand_port);
 			// Let mytunnel know what port has been assigned
-			char response[13];
-			sprintf(response, "%d", rand_port);
-			int n;
-			n = sendto(local_listen_sock, response, sizeof response, 0,
-			           (struct sockaddr *) &their_addr, addr_len);
-			if (n < 0)
-				perror("ERROR in sendto\n");
-			//printf("Now send client data to server \n");
+			//	printf("Now send client data to server \n");
 
 			struct	sockaddr_in server;
 			struct  hostent *hp, *gethostbyname();
 
 			server.sin_family = AF_INET;
-			hp = gethostbyname(packet.server_ip);
-			bcopy ( hp->h_addr, &(server.sin_addr.s_addr), hp->h_length);
-			server.sin_port = htons(atoi(packet.server_port));
 
-			//printf("host name  %s | host port %d \n", packet.server_ip, ntohs(server.sin_port));
-			struct sockaddr * client_addr = NULL;
-			send_socket_data(local_listen_sock,(struct sockaddr*) &server);
-			close(local_listen_sock);
+			//	printf("host name  %s | host port %d \n", packet.server_ip, ntohs(server.sin_port));	
+			hp = gethostbyname(packet.server_ip);
+			if(hp != NULL)
+			{
+				bcopy ( hp->h_addr, &(server.sin_addr.s_addr), hp->h_length);
+				server.sin_port = htons(atoi(packet.server_port));
+				char response[13];
+				sprintf(response, "%d", rand_port);
+				int n;
+				n = sendto(local_listen_sock, response, sizeof response, 0,
+			           (struct sockaddr *) &their_addr, addr_len);
+				if (n < 0)
+				{
+					perror("ERROR in sendto\n");
+					goto EXIT_THIS_CHILD;
+				}
+				//	printf("host name  %s | host port %d \n", packet.server_ip, ntohs(server.sin_port));
+				struct sockaddr * client_addr = NULL;
+				send_socket_data(local_listen_sock,(struct sockaddr*) &server);
+			}
+			else
+			{
+				printf("Server ip address provided is invalid. No tunnel made.\n");
+				char response[13];
+				sprintf(response, "%d", -1);
+				int n;
+				n = sendto(local_listen_sock, response, sizeof response, 0,
+			           (struct sockaddr *) &their_addr, addr_len);
+				if (n < 0)
+				{
+					perror("ERROR in sendto\n");
+				}
+				goto EXIT_THIS_CHILD;
+			}
+			
+			EXIT_THIS_CHILD:
+				close(local_listen_sock);
+				exit(EXIT_SUCCESS);
 		}
 	}
 	close(sockfd);
@@ -175,7 +204,7 @@ size_t send_socket_data(int in_fd, struct sockaddr * server_addr)
 
 			if(numRead == -1) continue;
 
-		//	printf("numread is %d\n", (int) numRead);
+			//printf("numread is %d\n", (int) numRead);
 			client_addr = &recv_sock;
 
 			char * opp_hostname = get_in_addr((struct sockaddr *)&recv_sock);
@@ -185,13 +214,12 @@ size_t send_socket_data(int in_fd, struct sockaddr * server_addr)
 			int opp_port_chk =  ntohs(get_in_port((struct sockaddr *)server_addr));
 
 
-			// printf("LHS1 is %s %d \n", opp_hostname, opp_port);
-			// printf("RHS1 is %s %d \n", opp_hostname_chk, opp_port_chk);
+		//	printf("LHS1 is %s %d \n", opp_hostname, opp_port);
+		//	printf("RHS1 is %s %d \n", opp_hostname_chk, opp_port_chk);
 
 			if(!strcmp(opp_hostname, opp_hostname_chk) && opp_port == opp_port_chk)
 			{
 				printf("No client so server can't send to anyone. \n ");
-				client_addr = NULL;
 				continue;
 			}
 
@@ -203,7 +231,7 @@ size_t send_socket_data(int in_fd, struct sockaddr * server_addr)
 			
 			if(numRead == -1) continue;
 
-//			printf("numread is %d\n", (int) numRead);
+		//	printf("numread is %d\n", (int) numRead);
 			char * opp_hostname = get_in_addr((struct sockaddr *)&test_recv_sock);
 			int opp_port =  ntohs(get_in_port((struct sockaddr *)&test_recv_sock));
 
@@ -211,17 +239,17 @@ size_t send_socket_data(int in_fd, struct sockaddr * server_addr)
 			int opp_port_chk =  ntohs(get_in_port((struct sockaddr *)server_addr));
 
 
-			// printf("LHS2 is %s %d \n", opp_hostname, opp_port);
-			// printf("RHS2 is %s %d \n", opp_hostname_chk, opp_port_chk);
+		//	printf("LHS2 is %s %d \n", opp_hostname, opp_port);
+		//	printf("RHS2 is %s %d \n", opp_hostname_chk, opp_port_chk);
 
 			if(!strcmp(opp_hostname, opp_hostname_chk) && opp_port == opp_port_chk)
 			{
-	//			printf("who to send is client \n");
+		//		printf("who to send is client \n");
 				who_to_send_addr = client_addr;
 			}
 			else
 			{
-				//printf("who to send is server \n");
+		//		printf("who to send is server \n");
 				who_to_send_addr = server_addr;
 			}
 
