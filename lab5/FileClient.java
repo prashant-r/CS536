@@ -25,9 +25,8 @@ public class FileClient
 
 	public static void validateCommandLineArguments(String args[]) throws Exception {
 		if (args.length != 5) {
-			printer.printf(
-				"Check number of arguments (expected 5 , got %d) - Usage hostname portnumber secretkey filename configfile.dat\n",
-				args.length);
+			System.out.println(
+				"Check number of arguments - Usage hostname portnumber secretkey filename configfile.dat\n");
 			System.exit(1);
 		}
 
@@ -43,49 +42,41 @@ public class FileClient
 
 // 	// Validate that the filename is of specified length and doesn't contain illegal characters
 	public static void validateFileName(String filename) throws Exception {
-		return;
-	// 	String invalid_filename_characters = " \n\t//";
-	// 	String string_iter = filename;
-	// 	size_t filename_len = strlen(filename);
-	// 	if (filename_len <= 16 && filename_len >= 0) {
-	// 		while (*string_iter) {
-	// 			if (strchr(invalid_filename_characters, *string_iter)) {
-
-	// 				perror("Filename cannot contain spaces or forward slashes ('/'), and it must not exceed 16 ASCII characters.");
-	// 				exit(1);
-	// 			}
-
-	// 			string_iter++;
-	// 		}
-	// 	} else {
-	// 		perror(
-	// 			"Filename cannot contain spaces or forward slashes ('/'), and it must not exceed 16 ASCII characters.");
-	// 		exit(1);
-
-	// 	}
+		String invalid_filename_characters = " \n\t//";
+		String string_iter = filename;
+		int filename_len = filename.length();
+		if (filename_len <= 16 && filename_len >= 0) {
+			if(string_iter.contains(invalid_filename_characters)){
+				
+				throw new Exception("Filename cannot contain spaces or forward slashes ('/'), and it must not exceed 16 ASCII characters.");	
+			}
+		} else {
+			throw new Exception(
+				"Filename cannot contain spaces or forward slashes ('/'), and it must not exceed 16 ASCII characters.");
+		}
 
 
-	// // So far, the filename is correct.
-	// // Now, check if file already exists
+		// So far, the filename is correct.
+		// Now, check if file already exists
 
-	// // Make the file path	
-	// 	String dir = "";
-	// 	char filePath[ 80 ] = { 0 };
-	// 	char gcwd[1024];
-	// 	if (getcwd(gcwd, sizeof(gcwd)) == NULL)
-	// 		perror("getcwd() error");
-	// 	strcat(filePath, gcwd);
-	// 	strcat(filePath, "/");
-	// 	strcat(filePath, filename);
-	// // Next, call access to check if the filepath is legal. If file exists balk. Else, its a new file download
-	// // so continue onwards.
-	// 	printf("File name %s \n ", filePath);
-	// 	if( access( filePath, F_OK ) == -1 ) {
-	// 		return;
-	// 	} else {
-	// 		printf("-- File already exists! Delete and retry-- \n");
-	// 		System.exit(EXIT_FAILURE);
-	// 	}
+		// // Make the file path	
+		String dir =  "";
+	 	String gcwd = "";
+		gcwd = System.getProperty("user.dir");
+		String filePath = "";
+		filePath += gcwd + "/" + filename;
+		// // Next, call access to check if the filepath is legal. If file exists balk. Else, its a new file download
+		// // so continue onwards.		
+		File f = new File(filePath);
+		if(f.exists() && !f.isDirectory()) { 
+    		System.out.println("-- File already exists! Delete and retry-- \n");
+			System.exit(EXIT_FAILURE);
+		}
+		else
+		{
+			// File doesn't exist. We good.
+			return;
+		}
 
 	}
 
@@ -99,7 +90,7 @@ public class FileClient
 			throw new Exception("Secret Key must be at least length 10 but not more than 20");
 		}
 		int i;
-		for (i=0; i <= secretKey_len;i++)
+		for (i=0; i < secretKey_len;i++)
 		{
 			if (!isascii(secretKey.charAt(i)))
 			{
