@@ -1,23 +1,6 @@
-#include <stdio.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <signal.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <sys/wait.h>
+import java.io.*;
+import java.util.*;
 
-
-
-typedef int bool;
-#define true 1
-#define false 0
 
 #define MAXIMUM_WAITING_CLIENTS 10
 #define MAX_BUF 1024
