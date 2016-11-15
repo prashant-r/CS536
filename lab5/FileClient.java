@@ -141,7 +141,7 @@ public class FileClient
 		// Construct message
         String str = "";
         str = String.format("$%s$", args[2]);
-        str += (args[3] + "\n");
+        str += (args[3]);
 
         FileClient cl = new FileClient();
         cl.makeConnection(args[0], Integer.parseInt(args[1]), str, args[3]);
