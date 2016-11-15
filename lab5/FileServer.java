@@ -1,308 +1,280 @@
-import java.io.*;
 import java.util.*;
+import java.io.*;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.lang.*;
+import java.nio.*;
 
-
-#define MAXIMUM_WAITING_CLIENTS 10
-#define MAX_BUF 1024
-
-
-uint32_t BLOCKSIZE;
-uint32_t FILE_SIZE_IN_BYTES;
-uint32_t NUMPACKETS;
-
-void handle_sigchld(int sig);
-void validateCommandLineArguments(int argc, char * argv[]);
-int setUpHalfAssociation(char * PORT);
-void validateConfigFile(char * filename);
-void validateSecretKey(char * secretKey);
-bool validateFile(char * filename);
-
-
-void handle_sigchld(int sig) {
-	int saved_errno = errno;
-	while (waitpid((pid_t)(-1), 0, WNOHANG|WUNTRACED) > 0) {}
-       errno = saved_errno;
-}
-
-// Sets up the half association 
-
-int setUpHalfAssociation(char * PORT)
+public class FileServer implements Runnable
 {
-	int halfAssociationSocketfd = -1;
-	struct addrinfo prepInfo;
-	struct addrinfo *availableSocketAddressesStructs;
+	public static  int  BLOCKSIZE = -1;
+	public static final int EXIT_SUCCESS =  0;
+	public static final int EXIT_FAILURE = -1;
+	public static final int BUFSIZ = 8192;
+	public static final String localhost = "localhost";
 
-	memset(&prepInfo, 0, sizeof prepInfo);
-	prepInfo.ai_family = AF_INET;
-	prepInfo.ai_socktype = SOCK_STREAM;
-	prepInfo.ai_flags = AI_PASSIVE;
-
-	if ((getaddrinfo(NULL, PORT, &prepInfo, &availableSocketAddressesStructs)) != 0) {//If it fails...
-		exit(EXIT_FAILURE);
-	}
-
-	while( availableSocketAddressesStructs != NULL)
+	// Validating the secret key is of legal size and is comprised of ascii characters solely.
+	public static void validateSecretKey(String secretKey) throws Exception
 	{
-		bool error = false;
+		int secretKey_len = secretKey.length();
 
-		if ((halfAssociationSocketfd = socket(availableSocketAddressesStructs->ai_family, availableSocketAddressesStructs->ai_socktype,
-            availableSocketAddressesStructs->ai_protocol)) == -1) {
-			error = true;
-  }
-  int t = 1;
-  if (setsockopt(halfAssociationSocketfd, SOL_SOCKET, SO_REUSEADDR, &t,sizeof(int)) == -1) {
-     exit(EXIT_FAILURE);
- }
-
- if (bind(halfAssociationSocketfd, availableSocketAddressesStructs->ai_addr, availableSocketAddressesStructs->ai_addrlen) == -1)
- {
-     close(halfAssociationSocketfd);
-     error = true;
- }
-
- if(error)
- {
-     availableSocketAddressesStructs = availableSocketAddressesStructs->ai_next;
- }
- else
- {
-     break;
- }
-}
-if (availableSocketAddressesStructs == NULL)  {
-  return -1;
-}
-
-freeaddrinfo(availableSocketAddressesStructs);
-return halfAssociationSocketfd;
-}
-// Validates the command line arguments
-void validateCommandLineArguments(int argc, char * argv[])
-{
-	if(argc != 4)
-	{
-		printf("Check number of arguments (expected 3 , got %d) - Usage portnumber secretkey configfile.dat\n", argc);
-		exit(1);
-	}
-	validateSecretKey(argv[2]);
-	validateConfigFile(argv[3]);
-}
-// Validates the config file exists and read the number in the file.
-void validateConfigFile(char * filename)
-{
-
-	FILE * fp;
-	fp = fopen (filename, "r");
-	rewind(fp);
-	fscanf(fp, "%d", &BLOCKSIZE);
-	fclose(fp);
-}
-// Validating the secret key is of legal size and is comprised of ascii characters solely.
-void validateSecretKey(char * secretKey)
-{
-	size_t secretKey_len = strlen(secretKey);
-
-	if(secretKey_len <10 || secretKey_len > 20 )
-	{
-		perror("Secret Key must be at least length 10 but not more than 20");
-		exit(1);
-	}
-	int i;
-	for (i=0; i <= secretKey_len;i++)
-	{
-		if (isascii(secretKey[i]) == 0 )
+		if(secretKey_len <10 || secretKey_len > 20 )
 		{
-			perror("Secret Key must be ASCII representable.");
-			exit(1);
+			throw new Exception("Secret Key must be at least length 10 but not more than 20");
 		}
-	}
-}
-// Validate that the filename is of specified length and doesn't contain illegal characters
-bool validateFile(char * filename)
-{
-	const char * invalid_filename_characters = " \n\t//";
-	char *string_iter = filename;
-	size_t filename_len = strlen(filename);
-	if (filename_len <= 16 && filename_len >= 0) {
-		while (*string_iter) {
-			if (strchr(invalid_filename_characters, *string_iter)) {
-
-				perror("Filename cannot contain spaces or forward slashes ('/'), and it must not exceed 16 ASCII characters.");
-				return false;
+		int i;
+		for (i=0; i < secretKey_len;i++)
+		{
+			if (!isascii(secretKey.charAt(i)))
+			{
+				throw new Exception("Secret Key must be ASCII representable.");
 			}
-
-			string_iter++;
 		}
-	} else {
-		perror(
-			"Filename cannot contain spaces or forward slashes ('/'), and it must not exceed 16 ASCII characters.");
-		return false;
-
 	}
 
-	/*
-
-		Check if the file exists in the file deposit directory. 
-
-
-	*/
-	// Make the file path	
-	char const * dir = "filedeposit";
-    char filePath[ 80 ] = { 0 };
-    strcat(filePath, dir );
-    strcat(filePath, "/");
-    strcat(filePath, filename);
-    // if the file exists then return true else false.
-
-    if( access( filePath, F_OK ) != -1 ) {
-    	return true;
-    } else {
-    	printf("File doesn't exist \n");
-    	return false;
-    }
-}
-
-int main(int argc, char * argv[])
-{
-
-	//NUMPACKETS = (FILE_SIZE_IN_BYTES + BLOCKSIZE - 1) / BLOCKSIZE;
-	// Validate the command line arguments
-	validateCommandLineArguments(argc, argv);
-
-	int halfAssocSockfd;// socket file descriptor to create half association
-	int fullAssocSockfd;// socket file descriptor to create full association
-
-	halfAssocSockfd = setUpHalfAssociation(argv[1]);
-
-
-	char * secretKeyGiven = argv[2];
-
-	if(halfAssocSockfd == -1)
+	public static boolean isascii(char c)
 	{
-		printf("\n Failed to set up half association \n");
-		return 2;
-	}
-
-	printf("Server ON.\n");
-
-	if (listen(halfAssocSockfd, MAXIMUM_WAITING_CLIENTS) == -1) {//If it fails...
-		close(halfAssocSockfd);
-		exit(EXIT_FAILURE);
-	}
-
-	char clientAddress[INET6_ADDRSTRLEN];
-	signal(SIGCHLD, handle_sigchld);
-	while (1)
-	{
-		socklen_t sin_size = sizeof clientAddress;
-
-		// At this point constructed the full association
-		fullAssocSockfd = accept(halfAssocSockfd, (struct sockaddr *)&clientAddress, &sin_size);
-
-		if(fullAssocSockfd == -1)
-		{
-			close(fullAssocSockfd);
-			close(halfAssocSockfd);
-			exit(EXIT_FAILURE);
+		if (c > 0x7F) {
+			return false;
 		}
-		int child;
-		// Fork a child process to carry out actual file transfer
-		if (!(child =fork()))
+		return true;
+	}
+
+	// Validate that the filename is of specified length and doesn't contain illegal characters
+	public static boolean validateFileName(String filename) throws Exception {
+		String invalid_filename_characters = " \n\t//";
+		String string_iter = filename;
+		int filename_len = filename.length();
+		if (filename_len <= 16 && filename_len >= 0) {
+			if(string_iter.contains(invalid_filename_characters)){
+
+				throw new Exception("Filename cannot contain spaces or forward slashes ('/'), and it must not exceed 16 ASCII characters.");	
+			}
+		} else {
+			throw new Exception(
+				"Filename cannot contain spaces or forward slashes ('/'), and it must not exceed 16 ASCII characters.");
+		}
+
+		// So far, the filename is correct.
+		// Now, check if file already exists
+
+		// Make the file path	
+		String dir =  "";
+		String gcwd = "";
+		gcwd = System.getProperty("user.dir");
+		String filePath = "";
+		filePath += gcwd + "/filedeposit/" + filename;
+
+		// Next, call access to check if the filepath is legal. If file exists balk. Else, its a new file download
+		// so continue onwards.		
+		File f = new File(filePath);
+		if(f.exists() && !f.isDirectory()) { 
+			return true;
+		}
+		else
 		{
+			System.out.println("File doesn't exist \n");
+			return false;
+		}
+	}
 
-			// this is the child process
-			close(halfAssocSockfd);
+	public byte[] longToBytes(long x) {
+    	ByteBuffer buffer = ByteBuffer.allocate(Long.BYTES);
+    	buffer.putLong(x);
+    	return buffer.array();
+	}
+	public class WorkerRunnable implements Runnable{
 
-            char requestBuf[BUFSIZ];
-            char buf[BLOCKSIZE];
+		protected Socket clientSocket = null;
+		protected String serverText   = null;
+		protected String secretKeyGiven = "";
+		protected volatile byte[] buffer; 
+		protected volatile int count;
 
-			// Read the response
-            int numReadBytes;
-            if ((numReadBytes = read(fullAssocSockfd, requestBuf, sizeof(requestBuf))) > 0)
-            {
-                requestBuf[numReadBytes] = '\0';
-            }
+		public WorkerRunnable(Socket clientSocket, String serverText, String secretKeyGiven) {
+			this.clientSocket = clientSocket;
+			this.serverText   = serverText;
+			this.secretKeyGiven = secretKeyGiven;
+		}
 
-			// Decode the message
-            char *saveptr;
-            char *secretKey, *filename;
-            secretKey = strtok_r(requestBuf, "$", &saveptr);
-            filename = strtok_r(NULL, "$", &saveptr);
+		public synchronized void run() {
 
-			// file descriptor
-            int fd;
-            // If the secret keys match then continue onwards
-            if(strcmp(secretKey, secretKeyGiven ) == 0)
-            {
-                if(validateFile(filename) == true)
-                {
-                	// Check if the filename provided by client is valid 
-                	// and exists in the filedeposit directory.
+		try {
+		BufferedReader inFromClient = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+  		
+		// Decode the message
+  		String commandRequest = inFromClient.readLine();
+  		String delims = "[$]";
+		String[] tokens = commandRequest.split(delims);
+		String secretKey = tokens[1];
+		String filename = tokens[2];
 
-                    unsigned long long check_sum =0;
-                    char const * dir = "filedeposit";
-                    char filePath[ 80 ] = { 0 };
-                    strcat(filePath, dir );
-                    strcat(filePath, "/");
-                    strcat(filePath, filename);
+		if(secretKey.trim().equals(secretKeyGiven.trim()))
+		{
+			if(validateFileName(filename))
+			{
+				try {
 
-                    if ((fd = open(filePath,O_RDONLY))==-1){
-                      perror("failed to open file");
-                      return EXIT_FAILURE;
-                  }
-                  // Send the packets one by one of size BLOCKSIZE
-                  // Compute the checksum of the file and add it to the end of the file later
-                  
-                  int num_read = -1;
-                  while((num_read = read(fd,buf,BLOCKSIZE)) > 0){
+					DataOutputStream dos = new DataOutputStream(clientSocket.getOutputStream());			
+					String dir =  "";
+					String gcwd = "";
+					gcwd = System.getProperty("user.dir");
+					String filePath = "";
+					filePath += gcwd + "/filedeposit/" + filename;
+					filename = filePath;
+			    	FileInputStream fis = new FileInputStream(filename);
+					buffer = new byte[BLOCKSIZE];
+					long check_sum = 0;
+					count = 0;
+					int totalcount = 0;
+            		while ((count = fis.read(buffer, 0, BLOCKSIZE)) > 0)
+            		{
+            			for(int a = 0; a < count; a++)
+            			{
+            				check_sum+=(long) buffer[a];
+            				dos.write(buffer[a]);
+            			}
+            		}
 
-                     int x;
-                     for(x =0 ; x < num_read; x++)
-                     {
-                        check_sum+= buf[x];
-                    }
-                    if(num_read==-1){
-                     perror("failed to read file \n ");
-                     return EXIT_FAILURE;
-                 }
-                 // Write out the characters
-                 int num_written = write(fullAssocSockfd, buf, num_read);
-                 if(num_written==-1){
-                     perror("failed to write file to fullAssocSockfd \n");
-                     return EXIT_FAILURE;
-                 }
-                 memset(&buf[0], 0, BLOCKSIZE);
-             }
-             // convert checksum to big endian as per lab 1
-             check_sum = htobe64(check_sum);
-             // write out the check sum 
-             write(fullAssocSockfd, (void *)&check_sum, 8);
-             // write out the 0 byte so as to signify end of transmission.
-             write(fullAssocSockfd, buf, 0);
-             close(fullAssocSockfd);
-             exit(EXIT_SUCCESS);
-         }
-         else
-         {
+            		dos.write(longToBytes(check_sum));
+					fis.close();
+					dos.close();
+				} catch (Exception e) {
+            		//report exception somewhere.
+					e.printStackTrace();
+				}
+			}
+		}
+		else
+		{
+			System.out.println("Secret Key did not match !");	
+		}
+		clientSocket.close();
+		}
+		catch(Exception e)
+		{
+			e.printStackTrace();
+		}
 
-			// Kill Gracefully, Close the connection with failed error. Ignore the request bad filename specified by client.
-            close(fullAssocSockfd);
-            exit(EXIT_FAILURE);
-        }    
-    }
-    else
-    {
-        printf("Secret Key Mismatch Given Key : %s | Expected Key : %s \n", secretKeyGiven, secretKey);
-    }
-    exit(EXIT_SUCCESS);
+		}
+	}
+
+	protected int          serverPort   = 8080;
+	protected ServerSocket serverSocket = null;
+	protected boolean      isStopped    = false;
+	protected Thread       runningThread= null;
+	protected String 	   secretKeyGiven = "";
+
+	public FileServer(int port, String secretKeyGiven){
+		this.serverPort = port;
+		this.secretKeyGiven = secretKeyGiven;
+	}
+
+	public void run(){
+		synchronized(this){
+			this.runningThread = Thread.currentThread();
+		}
+		openServerSocket();
+		while(! isStopped()){
+			System.out.println("SERVER ON.");
+			Socket clientSocket = null;
+			try {
+				clientSocket = this.serverSocket.accept();
+			} catch (IOException e) {
+				if(isStopped()) {
+					System.out.println("Server Stopped.") ;
+					return;
+				}
+				throw new RuntimeException(
+					"Error accepting client connection", e);
+			}
+			new Thread(
+				new WorkerRunnable(
+					clientSocket, "Multithreaded Server", secretKeyGiven)
+				).start();
+		}
+		System.out.println("Server Stopped.") ;
+	}
+
+
+	private synchronized boolean isStopped() {
+		return this.isStopped;
+	}
+
+	public synchronized void stop(){
+		this.isStopped = true;
+		try {
+			this.serverSocket.close();
+		} catch (IOException e) {
+			throw new RuntimeException("Error closing server", e);
+		}
+	}
+
+	private void openServerSocket() {
+		try {
+			this.serverSocket = new ServerSocket(this.serverPort);
+		} catch (IOException e) {
+			throw new RuntimeException("Cannot open port 8080", e);
+		}
+	}
+
+	public static void main(String args[]) throws Exception
+	{
+		validateCommandLineArguments(args);
+		FileServer server = new FileServer(Integer.parseInt(args[0]), args[1]);
+		new Thread(server).start();
+	}
+
+	// Validates the command line arguments
+	public static void validateCommandLineArguments(String args[]) throws Exception
+	{
+		if(args.length != 3)
+		{
+			System.out.println("Usage portnumber secretkey configfile.dat\n");
+			System.exit(1);
+		}
+		validateHostPort(localhost, args[0]);
+		validateSecretKey(args[1]);
+		validateConfigFile(args[2]);
+	}
+
+	// Validate the hostname and port number
+	public static void validateHostPort(String host, String port) throws Exception
+	{
+		try{
+			Integer.parseInt(port);
+		}
+		catch( Exception e) {
+			throw e;
+		}
+		if(host.isEmpty()) throw new Exception("Host name must not be empty!");
+	}
+
+	// Validates the config file exists and read the number in the file.
+	public static void validateConfigFile(String configFilename) throws Exception
+	{
+		File f = new File(configFilename);
+		if(f.exists() && !f.isDirectory()) { 
+			Scanner reader = new Scanner(f);
+
+			try{
+				BLOCKSIZE = reader.nextInt();
+			}
+			catch(Exception e)
+			{
+				throw e;
+			}
+			if(BLOCKSIZE == -1)
+			{
+				throw new Exception("Illegal blocksize.");
+			}
+		}
+		else
+		{
+			throw new Exception("Configfile.dat does not exist in filesystem.");
+		}
+	}
+
 }
-close(fullAssocSockfd);
-
-}
-close(halfAssocSockfd);
-return EXIT_SUCCESS;
-}
-
-
 
 
