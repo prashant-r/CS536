@@ -1,7 +1,6 @@
-
 /*
-* tunneld.c
-* Created on: Sep 17, 2016
+* audiostream.c
+* Created on: Nov 15, 2016
 *      Author: prashantravi
 */
 #include <stdio.h>
@@ -82,8 +81,10 @@ void handle_packet_transfer(FILE * logFile){
    	    		file = NULL;
     		}
     		struct timeval tz2; 
-			gettimeofday(&tz2, NULL);
-
+    		if (-1 == gettimeofday(&tz2, NULL)) {
+				perror("resettimeofday: gettimeofday");
+				exit(-1);
+			}
 			long ms = getTimeDifference(&tv1,&tz2);
 			double time_duration = ms/1000.0;
 			fprintf(logFile, "Time: %lf sec | Packet Spacing: %d  \n", time_duration, pktSpcing);

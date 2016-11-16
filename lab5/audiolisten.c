@@ -1,7 +1,8 @@
-/* 
- * tcpclient.c - A simple TCP client
- * usage: tcpclient <host> <port>
- */
+/*
+* audiolisten.c
+* Created on: Nov 15, 2016
+*      Author: prashantravi
+*/
 #include <stdio.h>
 #include <stdlib.h>
 #include <netinet/in.h>
@@ -21,13 +22,27 @@
 #include <stdbool.h>
 #include <stdio_ext.h>
 
+#include <strings.h>
+#include <unistd.h>
+#include <linux/soundcard.h>
+#include <sys/ioctl.h>
+
 #define BUFSIZE 1024
+#define AUDIODEVICE "/dev/sdb1"
+#define AUDIOMODE O_RDWR
+
 int create_socket_to_listen_on(char *rand_port);
 size_t send_socket_data(int in_fd, char * message, struct sockaddr * server_addr);
 size_t recv_socket_data(int in_fd, char * buffer);
 void packet_handler();
+void playback_handler();
+int open_audio();
+void close_audio(int fd);
 int pyld_sz;
+int pl_del;
 int sfd;
+int audio_fd;
+struct timeval startWatch;
 /* 
  * error - wrapper for perror
  */
@@ -38,21 +53,79 @@ void error(char *msg) {
 
 volatile bool playing = false;
 
+
+int open_audio()
+{
+    int arg, err, fd=-1;
+    struct stat st;
+
+
+    /* stat the device */
+    err = stat(AUDIODEVICE, &st);
+    if (err < 0)
+    {
+        fprintf(stderr,"cannot stat audio device");
+        exit(1);
+    }
+    /*  verify if is a character device */
+    if (!S_ISCHR(st.st_mode))
+    {
+        fprintf(stderr,"%s is not an audio device\n", AUDIODEVICE);
+        exit(1);
+    }
+    /* try to open the device, otherwise*/
+    fd= open(AUDIODEVICE, AUDIOMODE /* | O_NONBLOCK */);
+    if ((fd < 0) && (errno == EBUSY))
+    {
+        printf ("%s is busy\nwaiting...\n", AUDIODEVICE);
+
+        /* Now hang until it's open */
+        /* blocking open will wait until other applications stop using it */
+        fd= open(AUDIODEVICE, AUDIOMODE);
+    }
+
+    if (fd < 0)
+    {
+        printf("error opening audio device");
+        exit(1);
+    }
+
+    arg=0x00020008;
+
+    if (ioctl(fd, SNDCTL_DSP_SETFRAGMENT, &arg))
+        printf("audio_open: ioctl\n");
+
+    return fd;
+}
+
+void close_audio(int fd)
+{
+    close(fd);
+}
+
+void playback_handler()
+{
+
+
+}
+
+
 void packet_handler()
 {
     char buffer[pyld_sz];
     int n = 0;
     n = recv_socket_data(sfd, buffer);
-    if(n == 0)
-    {
-        // End of transmission 
-
-        printf("End of transmission \n");
-    }
-    else if( n > 0)
+    if( n > 0)
     {
         // Some data coming my way.
         printf("Data coming \n");
+        write(audio_fd, buffer, sizeof(buffer));
+    }
+    else if(n == 0)
+    {
+        // End of transmission 
+        printf("End of transmission \n");
+        playing = false;
     }
     else
     {
@@ -87,6 +160,7 @@ int main(int argc, char **argv) {
     payload_size = argv[4];
     pyld_sz = atoi(payload_size);
     playback_del = argv[5];
+    pl_del = atoi(playback_del);
     gamma = argv[6];
     buf_sz = argv[7];
     target_buf = argv[8];
@@ -124,7 +198,7 @@ int main(int argc, char **argv) {
     sa.sa_flags = SA_SIGINFO;
     if (!((sigaction(SIGIO, &sa, NULL ) == 0) && (sigaction(SIGPOLL, &sa, NULL) == 0)))
     {
-        perror("Can't create signal action.");
+        perror("Can't create io signal action.");
         exit(EXIT_FAILURE);
     }
 
@@ -153,10 +227,20 @@ int main(int argc, char **argv) {
       error("ERROR reading from socket");
     printf("Echo from server: %s\n", buf);
     close(sockfd);
+
+    /* open the audio device driver */
+    audio_fd = open_audio();
+
+    if (-1 == gettimeofday(&startWatch, NULL)) {
+        perror("resettimeofday: gettimeofday");
+        exit(-1);
+    }
     playing = true;
+    usleep(pl_del*1000);
     while(playing)
     {
-
+        usleep(atoi(gamma)*1000);
+        playback_handler();
     }
     return 0;
 }
