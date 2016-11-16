@@ -21,15 +21,17 @@
 #include <termios.h>
 #include <stdbool.h>
 #include <stdio_ext.h>
-
+#include <semaphore.h>
 #include <strings.h>
 #include <unistd.h>
 #include <linux/soundcard.h>
 #include <sys/ioctl.h>
+#include <pthread.h>
 
 #define BUFSIZE 1024
-#define AUDIODEVICE "/dev/sdb1"
-#define AUDIOMODE O_RDWR
+#define AUDIODEVICE "a.txt"
+#define AUDIOMODE O_WRONLY | O_NONBLOCK
+#define SHARED 1
 
 int create_socket_to_listen_on(char *rand_port);
 size_t send_socket_data(int in_fd, char * message, struct sockaddr * server_addr);
@@ -37,12 +39,22 @@ size_t recv_socket_data(int in_fd, char * buffer);
 void packet_handler();
 void playback_handler();
 int open_audio();
+void report_statistics(int Q_star, int Q_t, int tau);
 void close_audio(int fd);
+long getTimeDifference(struct timeval *t1 , struct timeval *t2);
+
 int pyld_sz;
-int pl_del;
+unsigned int pl_del;
 int sfd;
 int audio_fd;
+int target_buf_sz;
+unsigned int gamma;
+FILE * logFile;
+struct sockaddr_in * server_to_transact_with;
+volatile int current_buffer_level;
 struct timeval startWatch;
+sem_t empty, full;
+char * shared_buffer;
 /* 
  * error - wrapper for perror
  */
@@ -56,81 +68,126 @@ volatile bool playing = false;
 
 int open_audio()
 {
-    int arg, err, fd=-1;
-    struct stat st;
-
-
-    /* stat the device */
-    err = stat(AUDIODEVICE, &st);
-    if (err < 0)
-    {
-        fprintf(stderr,"cannot stat audio device");
-        exit(1);
-    }
-    /*  verify if is a character device */
-    if (!S_ISCHR(st.st_mode))
-    {
-        fprintf(stderr,"%s is not an audio device\n", AUDIODEVICE);
-        exit(1);
-    }
-    /* try to open the device, otherwise*/
-    fd= open(AUDIODEVICE, AUDIOMODE /* | O_NONBLOCK */);
-    if ((fd < 0) && (errno == EBUSY))
-    {
-        printf ("%s is busy\nwaiting...\n", AUDIODEVICE);
-
-        /* Now hang until it's open */
-        /* blocking open will wait until other applications stop using it */
-        fd= open(AUDIODEVICE, AUDIOMODE);
-    }
+    int fd=-1;
+    fd= fopen(AUDIODEVICE, "w");
 
     if (fd < 0)
     {
-        printf("error opening audio device");
+        printf("error opening audio device\n");
         exit(1);
     }
-
-    arg=0x00020008;
-
-    if (ioctl(fd, SNDCTL_DSP_SETFRAGMENT, &arg))
-        printf("audio_open: ioctl\n");
-
     return fd;
 }
 
 void close_audio(int fd)
 {
-    close(fd);
+    fclose(fd);
 }
 
 void playback_handler()
 {
+    
+    if(playing)
+    {
+        
+        if(sem_trywait(&full) != 0){
+            return;
+        }
+        if(current_buffer_level < pyld_sz)
+        {
+            // we can write off the buffer_level amount of stuff
+            write(audio_fd, shared_buffer, current_buffer_level);
+            current_buffer_level = 0;
+        }
+        else
+        {
+            // we need to move what we can't write
+            write(audio_fd, shared_buffer, pyld_sz);
+            memmove(shared_buffer, shared_buffer+pyld_sz, current_buffer_level - pyld_sz);
+            current_buffer_level = current_buffer_level - pyld_sz;
+        }  
 
-
+        struct timeval tz2; 
+        if (-1 == gettimeofday(&tz2, NULL)) {
+            perror("resettimeofday: gettimeofday");
+            exit(-1);
+        }
+        long ms = getTimeDifference(&startWatch,&tz2);
+        double time_duration = ms/1000.0;
+        fprintf(logFile, "Time: %lf sec | current_buffer_level: %d  \n", time_duration, current_buffer_level);
+        //printf("Empty allowed\n");
+    }
+   
+    
 }
 
 
 void packet_handler()
 {
-    char buffer[pyld_sz];
-    int n = 0;
-    n = recv_socket_data(sfd, buffer);
-    if( n > 0)
+    if(playing)
     {
-        // Some data coming my way.
-        printf("Data coming \n");
-        write(audio_fd, buffer, sizeof(buffer));
+        
+        char buffer[pyld_sz];
+        int n = 0;
+        n = recv_socket_data(sfd, buffer);
+        if( n > 0)
+        {
+            if(n == 3)
+            {
+                char god[15];
+                int ret;
+                strcpy(god, "GOD");
+                if(god[0] == buffer[0] && god[1] == buffer[1] && god[2] == buffer[2]){
+                    // End of transmission 
+                    printf("End of transmission \n");
+                    playing = false;
+                    fclose(logFile);
+                    return;
+                }
+            }
+            // Some data coming my way.
+        }
+        // Report the current statistics 
+        int tau = gamma;
+        report_statistics(target_buf_sz, current_buffer_level, tau);
+        memcpy(&(shared_buffer[current_buffer_level]), buffer, n);
+        current_buffer_level += n;
+        sem_post(&full);
+
     }
-    else if(n == 0)
-    {
-        // End of transmission 
-        printf("End of transmission \n");
-        playing = false;
-    }
-    else
-    {
-        perror("recvfrom: error in packet handler.\n");
-    }
+}
+
+
+void report_statistics(int Q_star, int Q_t, int tau)
+{
+    // convert first argument to char array
+    int i;
+    char first[11]; 
+    sprintf(first,"%d", Q_star);
+
+    // convert second argument to char array
+    char second[11]; 
+    sprintf(second,"%d", Q_t);
+
+    // convert third argument to char array
+    char third[11];
+    sprintf(third, "%d", tau);
+    // construct the statistic message
+    char statistic[50];
+    bzero(statistic, 50);
+    strcat(statistic, " ");
+    strcat(statistic, "Q");
+    strcat(statistic, " ");
+    strcat(statistic, first);
+    strcat(statistic, " ");
+    strcat(statistic, second);
+    strcat(statistic, " ");
+    strcat(statistic, third);
+    strcat(statistic, " ");
+
+    //printf("Statistic %s \n ", statistic);
+    // send the message over
+    send_socket_data(sfd, statistic, server_to_transact_with);
 }
 
 int main(int argc, char **argv) {
@@ -141,7 +198,6 @@ int main(int argc, char **argv) {
     char * client_udp_port;
     char * payload_size;
     char * playback_del;
-    char * gamma;
     char * buf_sz;
     char * target_buf;
     char * logfile_c;
@@ -151,8 +207,8 @@ int main(int argc, char **argv) {
 
     /* check command line arguments */
     if (argc != 11) {
-       fprintf(stderr,"usage: %s server-ip server-tcp-port client-udp-port payload-size playback-del gamma buf-sz target-buf logfile-c filename(short or long)\n", argv[0]);
-       exit(0);
+     fprintf(stderr,"usage: %s server-ip server-tcp-port client-udp-port payload-size playback-del gamma buf-sz target-buf logfile-c filename(short or long)\n", argv[0]);
+     exit(0);
     }
     hostname = argv[1];
     portno = atoi(argv[2]);
@@ -161,12 +217,15 @@ int main(int argc, char **argv) {
     pyld_sz = atoi(payload_size);
     playback_del = argv[5];
     pl_del = atoi(playback_del);
-    gamma = argv[6];
+    gamma = atoi(argv[6]);
     buf_sz = argv[7];
-    target_buf = argv[8];
+    int max_buf_sz = atoi(buf_sz);
+    target_buf = argv[8]; // Q*
+    target_buf_sz = atoi(target_buf);
     logfile_c = argv[9];
     filename = argv[10];
 
+    current_buffer_level = 0;
     /* socket: create the socket */
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) 
@@ -183,7 +242,7 @@ int main(int argc, char **argv) {
     bzero((char *) &serveraddr, sizeof(serveraddr));
     serveraddr.sin_family = AF_INET;
     bcopy((char *)server->h_addr, 
-	  (char *)&serveraddr.sin_addr.s_addr, server->h_length);
+     (char *)&serveraddr.sin_addr.s_addr, server->h_length);
     serveraddr.sin_port = htons(portno);
 
     /* connect: create a connection with the server */
@@ -204,7 +263,6 @@ int main(int argc, char **argv) {
 
     // create socket to listen on 
     sfd = create_socket_to_listen_on(client_udp_port);
-
     /* construct the message for the user */
     bzero(buf, BUFSIZE);
     char port_path[50];
@@ -215,34 +273,69 @@ int main(int argc, char **argv) {
     strcat(port_path, filename);
     strcpy(buf, port_path);
 
+
     /* send the message line to the server */
     n = write(sockfd, buf, strlen(buf));
     if (n < 0) 
-      error("ERROR writing to socket");
+        error("ERROR writing to socket");
 
     /* print the server's reply */
     bzero(buf, BUFSIZE);
     n = read(sockfd, buf, BUFSIZE);
     if (n < 0) 
-      error("ERROR reading from socket");
+        error("ERROR reading from socket");
     printf("Echo from server: %s\n", buf);
     close(sockfd);
 
-    /* open the audio device driver */
-    audio_fd = open_audio();
+    // decode the message
+    // Split the received buf by whitespace
+    char * pch;
+    char * server_status_r = strtok (buf," ");
+    char * server_port_r = strtok (NULL, " ");
 
-    if (-1 == gettimeofday(&startWatch, NULL)) {
-        perror("resettimeofday: gettimeofday");
-        exit(-1);
-    }
-    playing = true;
-    usleep(pl_del*1000);
-    while(playing)
+    if(strcmp(server_status_r, "OK") == 0)
     {
-        usleep(atoi(gamma)*1000);
-        playback_handler();
-    }
-    return 0;
+        // server to transact with
+        struct  sockaddr_in server;
+        server.sin_family = AF_INET;
+        struct hostent *hp, *gethostbyname();
+        hp = gethostbyname(hostname);
+        bcopy ( hp->h_addr, &(server.sin_addr.s_addr), hp->h_length);
+        server.sin_port = htons(atoi(server_port_r));
+        server_to_transact_with = &server;
+
+
+        /* open the audio device driver */
+        audio_fd = open_audio();
+
+        if (-1 == gettimeofday(&startWatch, NULL)) {
+            perror("resettimeofday: gettimeofday");
+            exit(-1);
+        }
+        shared_buffer = malloc( sizeof(char) * ( max_buf_sz + 1 ) );
+
+        // semaphore to protect the shared_buffer
+        sem_init(&full, SHARED, 1);   /* sem full = 1  */
+
+        /* open the file */
+        logFile = fopen(logfile_c, "wb");
+        if (logFile == NULL) {
+            printf("I couldn't open logfile_c for appending.\n");
+            exit(0);
+        }
+
+        playing = true;
+        usleep(pl_del*1000);
+        while(playing)
+        {
+            //printf("Made it here \n");
+            usleep(gamma*1000);
+            //printf("Made it here too\n");
+            playback_handler();
+        }
+        close_audio(audio_fd);
+}
+return 0;
 }
 
 
@@ -303,4 +396,14 @@ size_t recv_socket_data(int in_fd, char * buffer)
     int n = recvfrom(in_fd,buffer,pyld_sz,0,(struct sockaddr *)&from, &length);
     if (n < 0) error("recvfrom");
     return n;
+}
+
+long getTimeDifference(struct timeval *t1 , struct timeval *t2)
+{
+    struct timeval tv1 = *t1;
+    struct timeval tv2 = *t2;
+    long milliseconds;
+    milliseconds = (tv2.tv_usec - tv1.tv_usec) / 1000;
+    milliseconds += (tv2.tv_sec - tv1.tv_sec) *1000;
+    return milliseconds;
 }

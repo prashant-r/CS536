@@ -28,6 +28,7 @@ FILE *file;
 size_t nread;
 struct sockaddr_in * client_to_transact_with;
 int sock_fd;
+int mode;
 size_t pySz;
 size_t pktSpcing;
 struct timeval tv1;
@@ -45,6 +46,7 @@ void handle_sigpoll(int sig);
 void handle_child_request(FILE * logfileS, char* udpPort, char* payloadSize, char* packetSpacing, char* mode);
 char * trimwhitespace(char *str);
 long getTimeDifference(struct timeval *t1 , struct timeval *t2);
+size_t recv_socket_data(int in_fd, char * buffer);
 
 typedef enum {BUSY, READY} STATES;
 
@@ -52,8 +54,8 @@ volatile STATES state = READY;
 
 void handle_sigchld(int sig) {
 	int saved_errno = errno;
-	while (waitpid((pid_t)(-1), 0, WNOHANG|WUNTRACED) > 0) {}
-       errno = saved_errno;
+	while (waitpid((pid_t)(-1), 0, WNOHANG) > 0) {}
+		errno = saved_errno;
 }
 
 // Helper function to compute the time difference between two timevals 
@@ -72,23 +74,23 @@ void handle_packet_transfer(FILE * logFile){
 	//printf("%d\n",pySz );
 	char buf[pySz];
 	if (file) {
-    	if((nread = fread(buf, 1, sizeof buf, file)) > 0)
-        {
-        	send_socket_data(sock_fd, buf, client_to_transact_with);
+		if((nread = fread(buf, 1, sizeof buf, file)) > 0)
+		{
+			send_socket_data(sock_fd, buf, client_to_transact_with);
         	//printf("%s\n", buf);
-   	    	if (ferror(file)) {
+			if (ferror(file)) {
         		/* deal with error */
-   	    		file = NULL;
-    		}
-    		struct timeval tz2; 
-    		if (-1 == gettimeofday(&tz2, NULL)) {
+				file = NULL;
+			}
+			struct timeval tz2; 
+			if (-1 == gettimeofday(&tz2, NULL)) {
 				perror("resettimeofday: gettimeofday");
 				exit(-1);
 			}
 			long ms = getTimeDifference(&tv1,&tz2);
 			double time_duration = ms/1000.0;
 			fprintf(logFile, "Time: %lf sec | Packet Spacing: %d  \n", time_duration, pktSpcing);
-    	}
+		}
 		else
 		{
 			printf("Done \n");
@@ -97,7 +99,19 @@ void handle_packet_transfer(FILE * logFile){
 			struct sockaddr recv_sock;
 			socklen_t addr_len = sizeof(recv_sock);
 			struct sockaddr * who_to_send_addr = client_to_transact_with;
-			numSent = sendto(sock_fd, buf, 0 , 0, who_to_send_addr, addr_len);
+			int packets_sent = 0;
+			char lastThreeBytes[] = {'G', 'O', 'D'};
+			int g =0;
+			// Send the last 3 3-byte packets without stopping.
+			for (g = 0; g< 3; g++)
+			{
+
+				if((packets_sent = sendto(sock_fd, lastThreeBytes, 3 , 0, who_to_send_addr, addr_len))== -1)
+				{
+					perror("sendto: failed\n");
+					exit(EXIT_FAILURE);
+				}
+			}
 
 			// TODO : reached end of file.
 			if(file)
@@ -110,7 +124,78 @@ void handle_packet_transfer(FILE * logFile){
 
 void handle_sigpoll(int sig){
 	int saved_errno = errno;
+
+	char buffer[50];
+	// parse the incoming message
+	recv_socket_data(sock_fd, buffer);
+
+	char * pch;
+	char * client_command_r = strtok (buffer," ");
+	char * client_q_star_r = strtok (NULL, " ");
+	char * client_q_r = strtok(NULL, " ");
+	char * client_tau_r = strtok( NULL, " ");
 	
+	printf("Congestion control called %s %s %s %s %s \n", client_command_r, client_q_star_r, client_q_r, client_tau_r);
+
+	if(*client_command_r == 'Q')
+	{
+
+		int qt = atoi(client_q_r);
+		int q_star = atoi(client_q_star_r);
+		int tau = atoi(client_tau_r);
+		int a = 3;
+		double delta = 0.5;
+		double epsilon = 0.2;
+		double beta = 0.5;
+		if(mode == 0)
+		{
+
+			//if Q(t) = Q∗ then λ(t + 1) ← λ(t)
+			if(qt == q_star)
+			{
+				pktSpcing = pktSpcing *1;
+			}
+			//if Q(t) < Q∗ then λ(t + 1) ← λ(t) + a
+			else if( qt < q_star)
+			{
+				pktSpcing = pktSpcing + a;
+			}
+			//if Q(t) > Q∗ then λ(t + 1) ← λ(t) − a
+			else
+			{
+				pktSpcing = pktSpcing - a;
+			}
+		}
+		else if(mode == 1)
+		{
+			//if Q(t) = Q∗ then λ(t + 1) ← λ(t)
+			if(qt == q_star)
+			{
+				pktSpcing = pktSpcing *1;
+			}
+			//if Q(t) < Q∗ then λ(t + 1) ← λ(t) + a
+			else if(qt < q_star)
+			{
+				pktSpcing = pktSpcing + a;
+			}
+			//if Q(t) > Q∗ then λ(t + 1) ← δ × λ(t)
+			else
+			{
+				pktSpcing = delta * pktSpcing; 
+			}
+		}
+		else if(mode == 2)
+		{
+			//λ(t + 1) ← λ(t) + ε(Q∗ − Q(t))
+			pktSpcing = pktSpcing + epsilon * (q_star - qt);
+		}
+		else if(mode == 3)
+		{
+			//λ(t + 1) ← λ(t) + ε(Q∗ − Q(t)) − β(λ(t) − γ)
+			pktSpcing = pktSpcing + (epsilon*(q_star - qt)) - beta * (pktSpcing - tau);
+		}
+		if(pktSpcing < 0 ) pktSpcing =1;
+	}
 	errno = saved_errno;
 }
 
@@ -127,11 +212,11 @@ size_t send_socket_data(int in_fd, char * message, struct sockaddr * server_addr
 
 int main(int argc, char** argv)
 {
+	printf("SERVER ON. \n");
 	char* tcpPort;
 	char* udpPort;
 	char* payloadSize;
 	char* packetSpacing;
-	char* mode;
 	char* logfileS;
 	if (argc != 7)
 	{
@@ -144,7 +229,7 @@ int main(int argc, char** argv)
 	pySz = atoi(payloadSize);
 	packetSpacing = argv[4];
 	pktSpcing = atoi(packetSpacing);
-	mode = argv[5];
+	mode = atoi(argv[5]);
 	logfileS = argv[6];
 	startTunnelServer(tcpPort, logfileS, udpPort, payloadSize, packetSpacing, mode);
 	return 0;
@@ -181,38 +266,38 @@ void startTunnelServer(char* myTCPport, char* logfileS, char* udpPort, char* pay
 	// loop through all the resultant server socket and bind to the first we can
 	for (p = servinfo; p != NULL; p = p->ai_next) {
 		if ((sockfd = socket(p->ai_family, p->ai_socktype,
-		                     p->ai_protocol)) == -1) {
+			p->ai_protocol)) == -1) {
 			//perror("receiver: socket \n");
 			continue;
-		}
-
-
-		if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-			close(sockfd);
-			//perror("receiver: bind \n");
-			continue;
-		}
-
-		break;
 	}
-	if (p == NULL) {
-		fprintf(stderr, "receiver: failed to bind socket\n");
-		return;
-	}	
-	freeaddrinfo(servinfo);
-	registration_proc(sockfd, logfileS, udpPort, payloadSize, packetSpacing, mode);
-	exit(EXIT_SUCCESS);
+
+
+	if (bind(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+		close(sockfd);
+			//perror("receiver: bind \n");
+		continue;
+	}
+
+	break;
+}
+if (p == NULL) {
+	fprintf(stderr, "receiver: failed to bind socket\n");
+	return;
+}	
+freeaddrinfo(servinfo);
+registration_proc(sockfd, logfileS, udpPort, payloadSize, packetSpacing, mode);
+exit(EXIT_SUCCESS);
 }
 
 char *trimwhitespace(char *str)
 {
-  char *end;
+	char *end;
 
   // Trim leading space
-  while(isspace((unsigned char)*str)) str++;
+	while(isspace((unsigned char)*str)) str++;
 
   if(*str == 0)  // All spaces?
-    return str;
+  	return str;
 
   // Trim trailing space
   end = str + strlen(str) - 1;
@@ -255,92 +340,92 @@ void registration_proc(int sockfd, char * logfileS, char* udpPort, char* payload
 	// open / create the log file
 	FILE * logFile;
     /* open the file */
-    logFile = fopen(logfileS, "a");
-    if (logFile == NULL) {
-        printf("I couldn't open results.dat for appending.\n");
-        exit(0);
-    }
+	logFile = fopen(logfileS, "wb");
+	if (logFile == NULL) {
+		printf("I couldn't open logfile_s for appending.\n");
+		exit(0);
+	}
 	/* 
    	 * listen: make this socket ready to accept connection requests 
    	 */
   	if (listen(sockfd, MAX_WAITING_CLIENTS) < 0) /* allow 5 requests to queue up */ 
-    	error("ERROR on listen");
+	error("ERROR on listen");
 
   	/* 
    	 * main loop: wait for a connection request, echo input line, 
    	 * then close connection.
   	 */
-  	clientlen = sizeof(clientaddr);
-    while (1) {
+	clientlen = sizeof(clientaddr);
+	while (1) {
 
-    	signal(SIGCHLD, handle_sigchld); 
+		signal(SIGCHLD, handle_sigchld); 
     	/* 
      	 * accept: wait for a connection request 
      	 */
-    	childfd = accept(sockfd, (struct sockaddr *) &clientaddr, &clientlen);
-    	if (childfd < 0) 
-      		error("ERROR on accept");
-    
+		childfd = accept(sockfd, (struct sockaddr *) &clientaddr, &clientlen);
+		if (childfd < 0) 
+			error("ERROR on accept");
+
     	/* 
      	* gethostbyaddr: determine who sent the message 
      	*/
-    	hostp = gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr, 
-			  sizeof(clientaddr.sin_addr.s_addr), AF_INET);
-    	if (hostp == NULL)
-      		error("ERROR on gethostbyaddr");
-    	hostaddrp = inet_ntoa(clientaddr.sin_addr);
-    	if (hostaddrp == NULL)
-      		error("ERROR on inet_ntoa\n");
-    	printf("server established connection with %s (%s)\n", hostp->h_name, hostaddrp);
+		hostp = gethostbyaddr((const char *)&clientaddr.sin_addr.s_addr, 
+			sizeof(clientaddr.sin_addr.s_addr), AF_INET);
+		if (hostp == NULL)
+			error("ERROR on gethostbyaddr");
+		hostaddrp = inet_ntoa(clientaddr.sin_addr);
+		if (hostaddrp == NULL)
+			error("ERROR on inet_ntoa\n");
+		printf("server established connection with %s (%s)\n", hostp->h_name, hostaddrp);
 
     	/* 
      	* read: read input string from the client
      	*/
-    	bzero(buf, BUFSIZE);
-    	n = read(childfd, buf, BUFSIZE);
-    	if (n < 0) 
-      		error("ERROR reading from socket");
-    
+		bzero(buf, BUFSIZE);
+		n = read(childfd, buf, BUFSIZE);
+		if (n < 0) 
+			error("ERROR reading from socket");
+
     	// Split the received buf by whitespace
-  		char * pch;
-  		char * client_port_r = strtok (buf," ");
-    	char * client_path_r = strtok (NULL, " ");
+		char * pch;
+		char * client_port_r = strtok (buf," ");
+		char * client_path_r = strtok (NULL, " ");
 
-    	trimwhitespace(client_port_r);
-    	trimwhitespace(client_path_r);
+		trimwhitespace(client_port_r);
+		trimwhitespace(client_path_r);
 
-    	struct	sockaddr_in server;
-    	server.sin_family = AF_INET;
-    	struct hostent *hp, *gethostbyname();
-    	hp = gethostbyname(hostp->h_name);
-    	bcopy ( hp->h_addr, &(server.sin_addr.s_addr), hp->h_length);
+		struct	sockaddr_in server;
+		server.sin_family = AF_INET;
+		struct hostent *hp, *gethostbyname();
+		hp = gethostbyname(hostp->h_name);
+		bcopy ( hp->h_addr, &(server.sin_addr.s_addr), hp->h_length);
 		server.sin_port = htons(atoi(client_port_r));
-
 		client_to_transact_with = &server;
+
   		// filename
-    	if( access(client_path_r, F_OK ) != -1 ) {
-    		memset(portbuf, 0, PORTBUFSIZE);
-    		char okport[15];
-    		bzero(okport, 15);
-			strcat(okport, "OK");
+		if( access(client_path_r, F_OK ) != -1 ) {
+			memset(portbuf, 0, PORTBUFSIZE);
+			char okport[15];
+			bzero(okport, 15);
+			strcat(okport, "OK ");
 			strcat(okport,udpPort);
-            strcpy(portbuf, okport);
-			n = write(childfd, buf, strlen(portbuf));
+			strcpy(portbuf, okport);
+			n = write(childfd, portbuf, strlen(portbuf));
 			char *mode = "r";
 			file = fopen(client_path_r, mode);
-    		if (n < 0) 
-      			error("ERROR writing to socket");
-    	} else {
-    		memset(buf, 0, sizeof(buf));
+			if (n < 0) 
+				error("ERROR writing to socket");
+		} else {
+			memset(buf, 0, sizeof(buf));
 			strcpy(buf, "KO");
 			/* 
      	 	* write: echo the input string back to the client 
      	 	*/
-    		n = write(childfd, buf, strlen(buf));
-    		if (n < 0) 
-      			error("ERROR writing to socket");
-    		printf("File doesn't exist \n");
-    		continue;
+			n = write(childfd, buf, strlen(buf));
+			if (n < 0) 
+				error("ERROR writing to socket");
+			printf("File doesn't exist \n");
+			continue;
 		}
 
 		int forked = fork();
@@ -354,12 +439,12 @@ void registration_proc(int sockfd, char * logfileS, char* udpPort, char* payload
 			perror("Fork failed. Check resource monitor.\n");
 			return;
 		}
-    	
 
-    	close(childfd);
-  	}
-  	close(sockfd);
-  	exit(EXIT_SUCCESS);
+
+		close(childfd);
+	}
+	close(sockfd);
+	exit(EXIT_SUCCESS);
 }
 
 void handle_child_request(FILE * logfileS, char* udpPort, char* payloadSize, char* packetSpacing, char* mode)
@@ -368,8 +453,8 @@ void handle_child_request(FILE * logfileS, char* udpPort, char* payloadSize, cha
 	sock_fd = create_socket_to_listen_on(udpPort);
 
 	if (-1 == gettimeofday(&tv1, NULL)) {
-				perror("resettimeofday: gettimeofday");
-				exit(-1);
+		perror("resettimeofday: gettimeofday");
+		exit(-1);
 	}
 	while(state != READY)
 	{
@@ -377,15 +462,15 @@ void handle_child_request(FILE * logfileS, char* udpPort, char* payloadSize, cha
 	}
 	state = BUSY;
 	unsigned int usecs = pktSpcing* 1000;
-    
+
 	while(state == BUSY)
 	{
 		handle_packet_transfer(logfileS);
 		usleep(usecs);
 	}
 	if (-1 == gettimeofday(&tv2, NULL)) {
-				perror("resettimeofday: gettimeofday");
-				exit(-1);
+		perror("resettimeofday: gettimeofday");
+		exit(-1);
 	}
 	long ms = getTimeDifference(&tv1,&tv2);
 	double time_duration = ms/1000.0;
@@ -430,4 +515,13 @@ int create_socket_to_listen_on(char *rand_port)
 		exit(EXIT_FAILURE);
 	}
 	return sd;
+}
+
+size_t recv_socket_data(int in_fd, char * buffer)
+{
+	struct sockaddr_in from;
+	size_t length=sizeof(struct sockaddr_in);
+	int n = recvfrom(in_fd,buffer,pySz,0,(struct sockaddr *)&from, &length);
+	if (n < 0) error("recvfrom");
+	return n;
 }
