@@ -31,7 +31,7 @@
 #define BUFSIZE 1024
 #define AUDIODEVICE "a.txt"
 #define AUDIOMODE O_WRONLY | O_NONBLOCK
-#define SHARED 1
+#define SHARED 0
 
 int create_socket_to_listen_on(char *rand_port);
 size_t send_socket_data(int in_fd, char * message, struct sockaddr * server_addr);
@@ -315,7 +315,7 @@ int main(int argc, char **argv) {
         shared_buffer = malloc( sizeof(char) * ( max_buf_sz + 1 ) );
 
         // semaphore to protect the shared_buffer
-        sem_init(&full, SHARED, 1);   /* sem full = 1  */
+        sem_init(&full, SHARED, 0);   /* sem full = 1  */
 
         /* open the file */
         logFile = fopen(logfile_c, "wb");
