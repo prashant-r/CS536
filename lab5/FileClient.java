@@ -223,20 +223,20 @@ public static void validateConfigFile(String configFilename) throws Exception
         Scanner reader = new Scanner(f);
         try{
          BLOCKSIZE = reader.nextInt();
-     }
-     catch(Exception e)
-     {
+    }
+    catch(Exception e)
+    {
       throw e;
-  }
-  if(BLOCKSIZE == -1)
-  {
-   throw new Exception("Illegal blocksize.");
-}
-}
-else
-{
-    throw new Exception("Configfile.dat does not exist in filesystem.");
-}
+    }
+    if(BLOCKSIZE == -1)
+    {
+      throw new Exception("Illegal blocksize.");
+    }
+    }
+    else
+    {
+        throw new Exception("Configfile.dat does not exist in filesystem.");
+    }
 }
 
 private static long getUnsigned(final byte b) {
