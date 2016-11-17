@@ -3,6 +3,7 @@
 * Created on: Nov 15, 2016
 *      Author: prashantravi
 */
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +26,7 @@
 #define MAX_WAITING_CLIENTS 10
 
 FILE *file;
+FILE *logFile;
 size_t nread;
 struct sockaddr_in * client_to_transact_with;
 int sock_fd;
@@ -34,7 +36,7 @@ size_t pktSpcing;
 struct timeval tv1;
 struct timeval tv2;
 
-int  create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPport);
+int create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPport);
 size_t send_socket_data(int in_fd, char * message, struct sockaddr * server_addr);
 int  create_socket_to_listen_on(char *rand_port);
 void startTunnelServer(char* myTCPport, char* logfileS, char *udpPort, char* payloadSize, char* packetSpacing, char* mode);
@@ -47,7 +49,7 @@ void handle_child_request(FILE * logfileS, char* udpPort, char* payloadSize, cha
 char * trimwhitespace(char *str);
 long getTimeDifference(struct timeval *t1 , struct timeval *t2);
 size_t recv_socket_data(int in_fd, char * buffer);
-
+void do_sleep(useconds_t time);
 typedef enum {BUSY, READY} STATES;
 
 volatile STATES state = READY;
@@ -70,8 +72,11 @@ long getTimeDifference(struct timeval *t1 , struct timeval *t2)
 	return milliseconds;
 }
 
-void handle_packet_transfer(FILE * logFile){
-	//printf("%d\n",pySz );
+void handle_sigalrm(int signal) {
+    if (signal != SIGALRM) {
+        fprintf(stderr, "Caught wrong signal: %d\n", signal);
+    }
+    //printf("Signal handler called \n");
 	char buf[pySz];
 	if (file) {
 		if((nread = fread(buf, 1, sizeof buf, file)) > 0)
@@ -135,7 +140,7 @@ void handle_sigpoll(int sig){
 	char * client_q_r = strtok(NULL, " ");
 	char * client_tau_r = strtok( NULL, " ");
 	
-	printf("Congestion control called %s %s %s %s %s \n", client_command_r, client_q_star_r, client_q_r, client_tau_r);
+	//printf("Congestion control called %s %s %s %s %s \n", client_command_r, client_q_star_r, client_q_r, client_tau_r);
 
 	if(*client_command_r == 'Q')
 	{
@@ -144,12 +149,12 @@ void handle_sigpoll(int sig){
 		int q_star = atoi(client_q_star_r);
 		int tau = atoi(client_tau_r);
 		int a = 3;
-		double delta = 0.5;
-		double epsilon = 0.2;
+		double delta = 0.30;
+		double epsilon = 0.0139;
 		double beta = 0.5;
+		printf("Bef pcktSpcing %d \n", pktSpcing);
 		if(mode == 0)
 		{
-
 			//if Q(t) = Q∗ then λ(t + 1) ← λ(t)
 			if(qt == q_star)
 			{
@@ -194,6 +199,8 @@ void handle_sigpoll(int sig){
 			//λ(t + 1) ← λ(t) + ε(Q∗ − Q(t)) − β(λ(t) − γ)
 			pktSpcing = pktSpcing + (epsilon*(q_star - qt)) - beta * (pktSpcing - tau);
 		}
+
+		printf("Aft pcktSpcing %d \n", pktSpcing);
 		if(pktSpcing < 0 ) pktSpcing =1;
 	}
 	errno = saved_errno;
@@ -338,7 +345,6 @@ void registration_proc(int sockfd, char * logfileS, char* udpPort, char* payload
 	}
 
 	// open / create the log file
-	FILE * logFile;
     /* open the file */
 	logFile = fopen(logfileS, "wb");
 	if (logFile == NULL) {
@@ -461,13 +467,12 @@ void handle_child_request(FILE * logfileS, char* udpPort, char* payloadSize, cha
 
 	}
 	state = BUSY;
-	unsigned int usecs = pktSpcing* 1000;
-
 	while(state == BUSY)
 	{
-		handle_packet_transfer(logfileS);
-		usleep(usecs);
+		printf("Still here packetSpacing %d \n", pktSpcing);
+		do_sleep(pktSpcing*1000);
 	}
+	printf("Outta here \n");
 	if (-1 == gettimeofday(&tv2, NULL)) {
 		perror("resettimeofday: gettimeofday");
 		exit(-1);
@@ -524,4 +529,29 @@ size_t recv_socket_data(int in_fd, char * buffer)
 	int n = recvfrom(in_fd,buffer,pySz,0,(struct sockaddr *)&from, &length);
 	if (n < 0) error("recvfrom");
 	return n;
+}
+
+
+void do_sleep(useconds_t time)
+{
+    struct sigaction sa;
+    
+    sigset_t mask;
+    
+    sa.sa_handler = &handle_sigalrm; // Intercept and ignore SIGALRM
+    sa.sa_flags = SA_RESTART;
+    sigfillset(&sa.sa_mask);
+    sigaction(SIGALRM, &sa, NULL);
+    
+    // Get the current signal mask
+    sigprocmask(0, NULL, &mask);
+
+    // Unblock SIGALRM
+    sigdelset(&mask, SIGALRM);
+
+    // Wait with this mask
+    ualarm(time, 0);
+    sigsuspend(&mask);
+
+    //printf("sigsuspend() returned\n");
 }
