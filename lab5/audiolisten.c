@@ -315,7 +315,7 @@ int main(int argc, char **argv) {
         shared_buffer = malloc( sizeof(char) * ( max_buf_sz + 1 ) );
 
         // semaphore to protect the shared_buffer
-        sem_init(&full, SHARED, 0);   /* sem full = 1  */
+        sem_init(&full, SHARED, 0);   /* sem full = 0 , shared between threads of same process */
 
         /* open the file */
         logFile = fopen(logfile_c, "wb");
@@ -334,6 +334,7 @@ int main(int argc, char **argv) {
             playback_handler();
         }
         close_audio(audio_fd);
+        sem_close(&full);
 }
 return 0;
 }
