@@ -195,6 +195,7 @@ void handle_sigpoll(int sig){
 			pktSpcing = pktSpcing + (epsilon*(q_star - qt)) - beta * (pktSpcing - tau);
 		}
 		if(pktSpcing < 0 ) pktSpcing =1;
+		if(pktSpcing >= 1000) pktSpcing = 999;
 	}
 	errno = saved_errno;
 }
