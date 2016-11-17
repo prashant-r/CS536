@@ -3,6 +3,7 @@
 * Created on: Nov 15, 2016
 *      Author: prashantravi
 */
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <netinet/in.h>
@@ -29,8 +30,8 @@
 #include <pthread.h>
 
 #define BUFSIZE 1024
-#define AUDIODEVICE "a.txt"
-#define AUDIOMODE O_WRONLY | O_NONBLOCK
+#define AUDIODEVICE "/dev/audio"
+#define AUDIOMODE O_WRONLY | O_NONBLOCK | O_ASYNC
 #define SHARED 0
 
 int create_socket_to_listen_on(char *rand_port);
@@ -42,18 +43,21 @@ int open_audio();
 void report_statistics(int Q_star, int Q_t, int tau);
 void close_audio(int fd);
 long getTimeDifference(struct timeval *t1 , struct timeval *t2);
+void handle_sigalrm(int signal);
 
 int pyld_sz;
 unsigned int pl_del;
 int sfd;
+int max_buf_sz;
 int audio_fd;
 int target_buf_sz;
 unsigned int gamma;
 FILE * logFile;
 struct sockaddr_in * server_to_transact_with;
 volatile int current_buffer_level;
+volatile bool playing = false;
 struct timeval startWatch;
-sem_t empty, full;
+volatile sem_t empty, full;
 char * shared_buffer;
 /* 
  * error - wrapper for perror
@@ -63,13 +67,10 @@ void error(char *msg) {
     exit(0);
 }
 
-volatile bool playing = false;
-
-
 int open_audio()
 {
     int fd=-1;
-    fd= fopen(AUDIODEVICE, "w");
+    fd= open(AUDIODEVICE, AUDIOMODE);
 
     if (fd < 0)
     {
@@ -81,30 +82,35 @@ int open_audio()
 
 void close_audio(int fd)
 {
-    fclose(fd);
+    close(fd);
 }
 
-void playback_handler()
-{
-    
+void handle_sigalrm(int signal) {
+    if (signal != SIGALRM) {
+        fprintf(stderr, "Caught wrong signal: %d\n", signal);
+    }
+
+    //printf("Playback handler called \n");
     if(playing)
     {
-        
         if(sem_trywait(&full) != 0){
             return;
         }
         if(current_buffer_level < pyld_sz)
         {
             // we can write off the buffer_level amount of stuff
+            //printf("Fails 1\n");
             write(audio_fd, shared_buffer, current_buffer_level);
             current_buffer_level = 0;
         }
         else
         {
+            //printf("Bef ||| current_buffer_level: %d  pyld_sz %d \n", current_buffer_level, pyld_sz);
             // we need to move what we can't write
             write(audio_fd, shared_buffer, pyld_sz);
             memmove(shared_buffer, shared_buffer+pyld_sz, current_buffer_level - pyld_sz);
             current_buffer_level = current_buffer_level - pyld_sz;
+            //printf("Aft1 ||| current_buffer_level: %d  pyld_sz %d \n", current_buffer_level, pyld_sz);
         }  
 
         struct timeval tz2; 
@@ -114,19 +120,19 @@ void playback_handler()
         }
         long ms = getTimeDifference(&startWatch,&tz2);
         double time_duration = ms/1000.0;
-        fprintf(logFile, "Time: %lf sec | current_buffer_level: %d  \n", time_duration, current_buffer_level);
+        //printf("Aft2 || Time: %lf sec | current_buffer_level: %d  \n", time_duration, current_buffer_level);
+        //fprintf(logFile, "Time: %lf sec | current_buffer_level: %d  \n", time_duration, current_buffer_level);
         //printf("Empty allowed\n");
+        do_sleep(gamma*1000);
     }
    
-    
 }
-
 
 void packet_handler()
 {
+
     if(playing)
     {
-        
         char buffer[pyld_sz];
         int n = 0;
         n = recv_socket_data(sfd, buffer);
@@ -134,9 +140,9 @@ void packet_handler()
         {
             if(n == 3)
             {
-                char god[15];
+                char god[3] = {'G', 'O', 'D'};
                 int ret;
-                strcpy(god, "GOD");
+                printf("The god %s \n", buffer);
                 if(god[0] == buffer[0] && god[1] == buffer[1] && god[2] == buffer[2]){
                     // End of transmission 
                     printf("End of transmission \n");
@@ -150,10 +156,11 @@ void packet_handler()
         // Report the current statistics 
         int tau = gamma;
         report_statistics(target_buf_sz, current_buffer_level, tau);
+        //printf("current_buffer_level %d max_buf_sz %d n %d\n", current_buffer_level, max_buf_sz, n);
         memcpy(&(shared_buffer[current_buffer_level]), buffer, n);
         current_buffer_level += n;
         sem_post(&full);
-
+        ualarm(3000,0);
     }
 }
 
@@ -219,13 +226,11 @@ int main(int argc, char **argv) {
     pl_del = atoi(playback_del);
     gamma = atoi(argv[6]);
     buf_sz = argv[7];
-    int max_buf_sz = atoi(buf_sz);
+    max_buf_sz = atoi(buf_sz);
     target_buf = argv[8]; // Q*
     target_buf_sz = atoi(target_buf);
     logfile_c = argv[9];
     filename = argv[10];
-
-    current_buffer_level = 0;
     /* socket: create the socket */
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) 
@@ -254,7 +259,7 @@ int main(int argc, char **argv) {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_sigaction = &packet_handler;
-    sa.sa_flags = SA_SIGINFO;
+    sa.sa_flags = SA_RESTART;
     if (!((sigaction(SIGIO, &sa, NULL ) == 0) && (sigaction(SIGPOLL, &sa, NULL) == 0)))
     {
         perror("Can't create io signal action.");
@@ -284,7 +289,7 @@ int main(int argc, char **argv) {
     n = read(sockfd, buf, BUFSIZE);
     if (n < 0) 
         error("ERROR reading from socket");
-    printf("Echo from server: %s\n", buf);
+    //printf("Echo from server: %s\n", buf);
     close(sockfd);
 
     // decode the message
@@ -325,16 +330,15 @@ int main(int argc, char **argv) {
         }
 
         playing = true;
-        usleep(pl_del*1000);
+        current_buffer_level = 0;
+        //printf("Here \n");
+        do_sleep(pl_del*1000);
         while(playing)
         {
-            //printf("Made it here \n");
-            usleep(gamma*1000);
-            //printf("Made it here too\n");
-            playback_handler();
         }
         close_audio(audio_fd);
         sem_close(&full);
+        sem_destroy(&full);
 }
 return 0;
 }
@@ -407,4 +411,24 @@ long getTimeDifference(struct timeval *t1 , struct timeval *t2)
     milliseconds = (tv2.tv_usec - tv1.tv_usec) / 1000;
     milliseconds += (tv2.tv_sec - tv1.tv_sec) *1000;
     return milliseconds;
+}
+
+void do_sleep(useconds_t time)
+{
+    struct sigaction sa;
+    sigset_t mask;
+    sa.sa_handler = &handle_sigalrm; // Intercept and ignore SIGALRM
+    sa.sa_flags = SA_RESTART; // Remove the handler after first signal
+    sigfillset(&sa.sa_mask);
+    sigaction(SIGALRM, &sa, NULL);
+    // Get the current signal mask
+    sigprocmask(0, NULL, &mask);
+
+    // Unblock SIGALRM
+    sigdelset(&mask, SIGALRM);
+
+    // Wait with this mask
+    ualarm(time, 0);
+    sigsuspend(&mask);
+    //printf("sigsuspend() returned\n");
 }
