@@ -36,20 +36,18 @@ size_t pktSpcing;
 struct timeval tv1;
 struct timeval tv2;
 
-int create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPport);
 size_t send_socket_data(int in_fd, char * message, struct sockaddr * server_addr);
 int  create_socket_to_listen_on(char *rand_port);
 void startTunnelServer(char* myTCPport, char* logfileS, char *udpPort, char* payloadSize, char* packetSpacing, char* mode);
 void registration_proc(int sockfd, char * logfileS, char* udpPort, char* payloadSize, char* packetSpacing, char* mode);
-bool isValidIpAddress(char *ipAddress);
 void handle_sigchld(int sig);
-void handle_packet_transfer(FILE * logFile);
 void handle_sigpoll(int sig);
 void handle_child_request(FILE * logfileS, char* udpPort, char* payloadSize, char* packetSpacing, char* mode);
 char * trimwhitespace(char *str);
 long getTimeDifference(struct timeval *t1 , struct timeval *t2);
 size_t recv_socket_data(int in_fd, char * buffer);
-void do_sleep(useconds_t time);
+void do_sleep_alarm(long time);
+void packet_transfer();
 typedef enum {BUSY, READY} STATES;
 
 volatile STATES state = READY;
@@ -72,10 +70,7 @@ long getTimeDifference(struct timeval *t1 , struct timeval *t2)
 	return milliseconds;
 }
 
-void handle_sigalrm(int signal) {
-    if (signal != SIGALRM) {
-        fprintf(stderr, "Caught wrong signal: %d\n", signal);
-    }
+void packet_transfer() {
     //printf("Signal handler called \n");
 	char buf[pySz];
 	if (file) {
@@ -140,7 +135,7 @@ void handle_sigpoll(int sig){
 	char * client_q_r = strtok(NULL, " ");
 	char * client_tau_r = strtok( NULL, " ");
 	
-	//printf("Congestion control called %s %s %s %s %s \n", client_command_r, client_q_star_r, client_q_r, client_tau_r);
+	printf("Congestion control called %s %s %s %s %s \n", client_command_r, client_q_star_r, client_q_r, client_tau_r);
 
 	if(*client_command_r == 'Q')
 	{
@@ -148,60 +143,53 @@ void handle_sigpoll(int sig){
 		int qt = atoi(client_q_r);
 		int q_star = atoi(client_q_star_r);
 		int tau = atoi(client_tau_r);
-		int a = 3;
+		int a = 1;
 		double delta = 0.30;
 		double epsilon = 0.0139;
 		double beta = 0.5;
 		printf("Bef pcktSpcing %d \n", pktSpcing);
 		if(mode == 0)
 		{
-			//if Q(t) = Q∗ then λ(t + 1) ← λ(t)
 			if(qt == q_star)
 			{
 				pktSpcing = pktSpcing *1;
 			}
-			//if Q(t) < Q∗ then λ(t + 1) ← λ(t) + a
 			else if( qt < q_star)
 			{
-				pktSpcing = pktSpcing + a;
+				pktSpcing = pktSpcing - a;
 			}
-			//if Q(t) > Q∗ then λ(t + 1) ← λ(t) − a
 			else
 			{
-				pktSpcing = pktSpcing - a;
+				pktSpcing = pktSpcing + a;
 			}
 		}
 		else if(mode == 1)
 		{
-			//if Q(t) = Q∗ then λ(t + 1) ← λ(t)
 			if(qt == q_star)
 			{
 				pktSpcing = pktSpcing *1;
 			}
-			//if Q(t) < Q∗ then λ(t + 1) ← λ(t) + a
 			else if(qt < q_star)
 			{
-				pktSpcing = pktSpcing + a;
+				pktSpcing = delta * pktSpcing;
+
 			}
-			//if Q(t) > Q∗ then λ(t + 1) ← δ × λ(t)
 			else
 			{
-				pktSpcing = delta * pktSpcing; 
+				pktSpcing = pktSpcing + a;
 			}
 		}
 		else if(mode == 2)
 		{
-			//λ(t + 1) ← λ(t) + ε(Q∗ − Q(t))
-			pktSpcing = pktSpcing + epsilon * (q_star - qt);
+			pktSpcing = pktSpcing - epsilon * (q_star - qt);
 		}
 		else if(mode == 3)
 		{
-			//λ(t + 1) ← λ(t) + ε(Q∗ − Q(t)) − β(λ(t) − γ)
-			pktSpcing = pktSpcing + (epsilon*(q_star - qt)) - beta * (pktSpcing - tau);
+			pktSpcing = pktSpcing - ((epsilon*(q_star - qt)) - beta * (pktSpcing - tau));
 		}
 
 		printf("Aft pcktSpcing %d \n", pktSpcing);
-		if(pktSpcing < 0 ) pktSpcing =1;
+		if(pktSpcing <= 0 ) pktSpcing =5;
 		if(pktSpcing >= 1000) pktSpcing = 999;
 	}
 	errno = saved_errno;
@@ -470,8 +458,7 @@ void handle_child_request(FILE * logfileS, char* udpPort, char* payloadSize, cha
 	state = BUSY;
 	while(state == BUSY)
 	{
-		printf("Still here packetSpacing %d \n", pktSpcing);
-		do_sleep(pktSpcing*1000);
+		do_sleep_alarm(pktSpcing);
 	}
 	printf("Outta here \n");
 	if (-1 == gettimeofday(&tv2, NULL)) {
@@ -533,26 +520,31 @@ size_t recv_socket_data(int in_fd, char * buffer)
 }
 
 
-void do_sleep(useconds_t time)
+void do_sleep_alarm(long time)
 {
-    struct sigaction sa;
-    
-    sigset_t mask;
-    
-    sa.sa_handler = &handle_sigalrm; // Intercept and ignore SIGALRM
-    sa.sa_flags = SA_RESTART;
-    sigfillset(&sa.sa_mask);
-    sigaction(SIGALRM, &sa, NULL);
-    
-    // Get the current signal mask
-    sigprocmask(0, NULL, &mask);
+	nsleep(time);
+	packet_transfer();
+}
 
-    // Unblock SIGALRM
-    sigdelset(&mask, SIGALRM);
 
-    // Wait with this mask
-    ualarm(time, 0);
-    sigsuspend(&mask);
+int nsleep(long miliseconds)
+{
+   struct timespec req, rem;
 
-    //printf("sigsuspend() returned\n");
+   if(miliseconds > 999)
+   {
+        req.tv_sec = (int)(miliseconds / 1000);                            /* Must be Non-Negative */
+        req.tv_nsec = (miliseconds - ((long)req.tv_sec * 1000)) * 1000000; /* Must be in range of 0 to 999999999 */
+   }
+   else
+   {
+        req.tv_sec = 0;                         /* Must be Non-Negative */
+        req.tv_nsec = miliseconds * 1000000;    /* Must be in range of 0 to 999999999 */
+   }
+   for(;;){
+	   if( nanosleep(&req , &req) == -1) continue;
+	   else break;
+   }
+
+   return 0;
 }

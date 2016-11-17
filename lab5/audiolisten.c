@@ -28,40 +28,39 @@
 #include <linux/soundcard.h>
 #include <sys/ioctl.h>
 #include <pthread.h>
-
+#include <time.h>
 #define BUFSIZE 1024
 #define AUDIODEVICE "/dev/audio"
-#define AUDIOMODE O_WRONLY | O_NONBLOCK | O_ASYNC
+#define AUDIOMODE O_WRONLY
 #define SHARED 0
 
 int create_socket_to_listen_on(char *rand_port);
 size_t send_socket_data(int in_fd, char * message, struct sockaddr * server_addr);
 size_t recv_socket_data(int in_fd, char * buffer);
 void packet_handler();
-void playback_handler();
 int  open_audio();
 void report_statistics(int Q_star, int Q_t, int tau);
 void close_audio(int fd);
 long getTimeDifference(struct timeval *t1 , struct timeval *t2);
-void handle_sigalrm(int signal);
+void playback_handler();
 int nsleep(long miliseconds);
+void do_sleep_alarm(long time);
+
 
 // TODO: Check arguments are correct.
-
-
 int pyld_sz;
-unsigned int pl_del;
+int pl_del;
 int sfd;
 int max_buf_sz;
 int audio_fd;
 int target_buf_sz;
-unsigned int gamma;
+int gamm_r;
 FILE * logFile;
 struct sockaddr_in * server_to_transact_with;
 volatile int current_buffer_level;
 volatile bool playing = false;
 struct timeval startWatch;
-volatile sem_t empty, full;
+sem_t full;
 char * shared_buffer;
 /* 
  * error - wrapper for perror
@@ -69,6 +68,29 @@ char * shared_buffer;
 void error(char *msg) {
     perror(msg);
     exit(0);
+}
+
+
+int nsleep(long miliseconds)
+{
+   struct timespec req, rem;
+
+   if(miliseconds > 999)
+   {
+        req.tv_sec = (int)(miliseconds / 1000);                            /* Must be Non-Negative */
+        req.tv_nsec = (miliseconds - ((long)req.tv_sec * 1000)) * 1000000; /* Must be in range of 0 to 999999999 */
+   }
+   else
+   {
+        req.tv_sec = 0;                         /* Must be Non-Negative */
+        req.tv_nsec = miliseconds * 1000000;    /* Must be in range of 0 to 999999999 */
+   }
+   for(;;){
+	   if( nanosleep(&req , &req) == -1) continue;
+	   else break;
+   }
+
+   return 0;
 }
 
 int open_audio()
@@ -89,14 +111,12 @@ void close_audio(int fd)
     close(fd);
 }
 
-void handle_sigalrm(int signal) {
-    if (signal != SIGALRM) {
-        fprintf(stderr, "Caught wrong signal: %d\n", signal);
-    }
+void playback_handler() {
 
-    //printf("Playback handler called \n");
+    printf("Playback handler called \n");
     if(playing)
     {
+    	printf("trying to play\n");
         if(sem_trywait(&full) != 0){
             return;
         }
@@ -106,15 +126,16 @@ void handle_sigalrm(int signal) {
             //printf("Fails 1\n");
             write(audio_fd, shared_buffer, current_buffer_level);
             current_buffer_level = 0;
+            printf("Bef1 ||| current_buffer_level: %d  pyld_sz %d \n", current_buffer_level, pyld_sz);
         }
         else
         {
-            //printf("Bef ||| current_buffer_level: %d  pyld_sz %d \n", current_buffer_level, pyld_sz);
+            printf("Bef2 ||| current_buffer_level: %d  pyld_sz %d \n", current_buffer_level, pyld_sz);
             // we need to move what we can't write
             write(audio_fd, shared_buffer, pyld_sz);
             memmove(shared_buffer, shared_buffer+pyld_sz, current_buffer_level - pyld_sz);
             current_buffer_level = current_buffer_level - pyld_sz;
-            //printf("Aft1 ||| current_buffer_level: %d  pyld_sz %d \n", current_buffer_level, pyld_sz);
+            printf("Aft2 ||| current_buffer_level: %d  pyld_sz %d \n", current_buffer_level, pyld_sz);
         }  
 
         struct timeval tz2; 
@@ -127,7 +148,6 @@ void handle_sigalrm(int signal) {
         //printf("Aft2 || Time: %lf sec | current_buffer_level: %d  \n", time_duration, current_buffer_level);
         //fprintf(logFile, "Time: %lf sec | current_buffer_level: %d  \n", time_duration, current_buffer_level);
         //printf("Empty allowed\n");
-        do_sleep_alarm(gamma*1000);
     }
    
 }
@@ -158,13 +178,12 @@ void packet_handler()
             // Some data coming my way.
         }
         // Report the current statistics 
-        int tau = gamma;
+        int tau = gamm_r;
         report_statistics(target_buf_sz, current_buffer_level, tau);
         //printf("current_buffer_level %d max_buf_sz %d n %d\n", current_buffer_level, max_buf_sz, n);
         memcpy(&(shared_buffer[current_buffer_level]), buffer, n);
         current_buffer_level += n;
         sem_post(&full);
-        do_sleep(tau*1000);
     }
 }
 
@@ -196,7 +215,7 @@ void report_statistics(int Q_star, int Q_t, int tau)
     strcat(statistic, third);
     strcat(statistic, " ");
 
-    //printf("Statistic %s \n ", statistic);
+    printf("Statistic %s \n ", statistic);
     // send the message over
     send_socket_data(sfd, statistic, server_to_transact_with);
 }
@@ -218,7 +237,7 @@ int main(int argc, char **argv) {
 
     /* check command line arguments */
     if (argc != 11) {
-     fprintf(stderr,"usage: %s server-ip server-tcp-port client-udp-port payload-size playback-del gamma buf-sz target-buf logfile-c filename(short or long)\n", argv[0]);
+     fprintf(stderr,"usage: %s server-ip server-tcp-port client-udp-port payload-size playback-del gamm_r buf-sz target-buf logfile-c filename(short or long)\n", argv[0]);
      exit(0);
     }
     hostname = argv[1];
@@ -228,7 +247,7 @@ int main(int argc, char **argv) {
     pyld_sz = atoi(payload_size);
     playback_del = argv[5];
     pl_del = atoi(playback_del);
-    gamma = atoi(argv[6]);
+    gamm_r = atoi(argv[6]);
     buf_sz = argv[7];
     max_buf_sz = atoi(buf_sz);
     target_buf = argv[8]; // Q*
@@ -336,10 +355,13 @@ int main(int argc, char **argv) {
         playing = true;
         current_buffer_level = 0;
         //printf("Here \n");
-        n_sleep(pl_del*1000);
-        do_sleep_alarm(0);
+        printf("Now sleep %d\n", pl_del);
+        nsleep((long) pl_del-1);
+        printf("Now wake up\n");
+        do_sleep_alarm(1);
         while(playing)
         {
+        	do_sleep_alarm(gamm_r);
         }
         close_audio(audio_fd);
         sem_close(&full);
@@ -418,47 +440,9 @@ long getTimeDifference(struct timeval *t1 , struct timeval *t2)
     return milliseconds;
 }
 
-void do_sleep_alarm(useconds_t time)
+void do_sleep_alarm(long time)
 {
-    struct sigaction sa;
-    sigset_t mask;
-    sa.sa_handler = &handle_sigalrm; // Intercept and ignore SIGALRM
-    sa.sa_flags = SA_RESTART; // Remove the handler after first signal
-    sigfillset(&sa.sa_mask);
-    sigaction(SIGALRM, &sa, NULL);
-    // Get the current signal mask
-    sigprocmask(0, NULL, &mask);
-
-    // Unblock SIGALRM
-    sigdelset(&mask, SIGALRM);
-
-    // Wait with this mask
-    if(time > 1000000)
-    {
-        perror("do_sleep : time too large.");
-        return;
-    }
-
-
-    ualarm(time, 0);
-    sigsuspend(&mask);
-    //printf("sigsuspend() returned\n");
+	nsleep(time);
+	playback_handler();
 }
 
-int nsleep(long miliseconds)
-{
-   struct timespec req, rem;
-
-   if(miliseconds > 999)
-   {   
-        req.tv_sec = (int)(miliseconds / 1000);                            /* Must be Non-Negative */
-        req.tv_nsec = (miliseconds - ((long)req.tv_sec * 1000)) * 1000000; /* Must be in range of 0 to 999999999 */
-   }   
-   else
-   {   
-        req.tv_sec = 0;                         /* Must be Non-Negative */
-        req.tv_nsec = miliseconds * 1000000;    /* Must be in range of 0 to 999999999 */
-   }   
-
-   return nanosleep(&req , &rem);
-}
