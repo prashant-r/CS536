@@ -34,6 +34,26 @@
 #define AUDIOMODE O_WRONLY
 #define SHARED 0
 
+
+
+// Example execution :
+// Here server-ip server-tcp-port client-udp-port payload-size playback-del gamma buf-sz target-buf logfile-c filename(short or long)
+//./audiolisten.o localhost 6554 5645 250 2500 30 40000 20000 logfile-c filedeposit/pp.au
+	// server-ip = localhost
+	// server-tcp-port = 6554
+	// client-udp-port = 5645
+	// payload-size = 250B
+	// playback-del = 2500 ms = 2.5 seconds
+	// lambda = 30msec
+	// buf-sz = 40,000
+	// target-buf = 20,000
+	// logfile-c
+	// filename = filedeposit/pp.au
+
+
+
+
+
 int create_socket_to_listen_on(char *rand_port);
 size_t send_socket_data(int in_fd, char * message, struct sockaddr * server_addr);
 size_t recv_socket_data(int in_fd, char * buffer);
@@ -45,8 +65,9 @@ long getTimeDifference(struct timeval *t1 , struct timeval *t2);
 void playback_handler();
 int nsleep(long miliseconds);
 void do_sleep_alarm(long time);
+void play_it_back();
 
-
+int plot_time;
 // TODO: Check arguments are correct.
 int pyld_sz;
 int pl_del;
@@ -56,12 +77,14 @@ int audio_fd;
 int target_buf_sz;
 int gamm_r;
 FILE * logFile;
+FILE * plotFile;
 struct sockaddr_in * server_to_transact_with;
 volatile int current_buffer_level;
-volatile bool playing = false;
+volatile bool transmitting = false;
 struct timeval startWatch;
 sem_t full;
 char * shared_buffer;
+int how_many_for_a_second;
 /* 
  * error - wrapper for perror
  */
@@ -74,7 +97,6 @@ void error(char *msg) {
 int nsleep(long miliseconds)
 {
    struct timespec req, rem;
-
    if(miliseconds > 999)
    {
         req.tv_sec = (int)(miliseconds / 1000);                            /* Must be Non-Negative */
@@ -97,7 +119,6 @@ int open_audio()
 {
     int fd=-1;
     fd= open(AUDIODEVICE, AUDIOMODE);
-
     if (fd < 0)
     {
         printf("error opening audio device\n");
@@ -113,49 +134,56 @@ void close_audio(int fd)
 
 void playback_handler() {
 
-    printf("Playback handler called \n");
-    if(playing)
+    if(transmitting)
     {
-    	printf("trying to play\n");
         if(sem_trywait(&full) != 0){
             return;
         }
-        if(current_buffer_level < pyld_sz)
-        {
-            // we can write off the buffer_level amount of stuff
-            //printf("Fails 1\n");
-            write(audio_fd, shared_buffer, current_buffer_level);
-            current_buffer_level = 0;
-            printf("Bef1 ||| current_buffer_level: %d  pyld_sz %d \n", current_buffer_level, pyld_sz);
-        }
-        else
-        {
-            printf("Bef2 ||| current_buffer_level: %d  pyld_sz %d \n", current_buffer_level, pyld_sz);
-            // we need to move what we can't write
-            write(audio_fd, shared_buffer, pyld_sz);
-            memmove(shared_buffer, shared_buffer+pyld_sz, current_buffer_level - pyld_sz);
-            current_buffer_level = current_buffer_level - pyld_sz;
-            printf("Aft2 ||| current_buffer_level: %d  pyld_sz %d \n", current_buffer_level, pyld_sz);
-        }  
-
-        struct timeval tz2; 
-        if (-1 == gettimeofday(&tz2, NULL)) {
-            perror("resettimeofday: gettimeofday");
-            exit(-1);
-        }
-        long ms = getTimeDifference(&startWatch,&tz2);
-        double time_duration = ms/1000.0;
-        //printf("Aft2 || Time: %lf sec | current_buffer_level: %d  \n", time_duration, current_buffer_level);
-        //fprintf(logFile, "Time: %lf sec | current_buffer_level: %d  \n", time_duration, current_buffer_level);
-        //printf("Empty allowed\n");
+        play_it_back();
     }
-   
+    else if(current_buffer_level && audio_fd)
+    	play_it_back();
+}
+int last_sec = -1;
+void play_it_back()
+{
+
+	if(current_buffer_level < pyld_sz)
+	{
+		// we can write off the buffer_level amount of stuff
+	    write(audio_fd, shared_buffer, current_buffer_level);
+	    current_buffer_level = 0;
+	}
+	else
+	{
+		// we need to move what we can't write
+		write(audio_fd, shared_buffer, pyld_sz);
+	    memmove(shared_buffer, shared_buffer+pyld_sz, current_buffer_level - pyld_sz);
+	    current_buffer_level = current_buffer_level - pyld_sz;
+	 }
+
+	 struct timeval tz2;
+	 if (-1 == gettimeofday(&tz2, NULL)) {
+		 perror("resettimeofday: gettimeofday");
+	     exit(-1);
+	 }
+	 long ms = getTimeDifference(&startWatch,&tz2);
+	 double time_duration = ms/1000.0;
+
+	 int curr_sec = (int) time_duration;
+	 if(curr_sec > last_sec)
+	 {
+	    fprintf(plotFile, "%d		%d\n", curr_sec, current_buffer_level);
+	    last_sec = curr_sec;
+	 }
+
+	 fprintf(logFile, "PB Handler | Time: %lf sec | current_buffer_level: %d  \n", time_duration, current_buffer_level);
 }
 
 void packet_handler()
 {
 
-    if(playing)
+    if(transmitting)
     {
         char buffer[pyld_sz];
         int n = 0;
@@ -166,24 +194,38 @@ void packet_handler()
             {
                 char god[3] = {'G', 'O', 'D'};
                 int ret;
-                printf("The god %s \n", buffer);
                 if(god[0] == buffer[0] && god[1] == buffer[1] && god[2] == buffer[2]){
                     // End of transmission 
-                    printf("End of transmission \n");
-                    playing = false;
-                    fclose(logFile);
+                    fprintf(logFile, "End of transmission current_buffer_level %d \n", current_buffer_level);
+                    transmitting = false;
                     return;
                 }
             }
-            // Some data coming my way.
+            // Some data came my way. Proceed to write to user buffer.
         }
         // Report the current statistics 
         int tau = gamm_r;
         report_statistics(target_buf_sz, current_buffer_level, tau);
-        //printf("current_buffer_level %d max_buf_sz %d n %d\n", current_buffer_level, max_buf_sz, n);
+        //printf("current_buffer_level %d \n ", current_buffer_level);
         memcpy(&(shared_buffer[current_buffer_level]), buffer, n);
         current_buffer_level += n;
         sem_post(&full);
+        struct timeval tz2;
+        if (-1 == gettimeofday(&tz2, NULL)) {
+        	perror("resettimeofday: gettimeofday");
+            exit(-1);
+        }
+        long ms = getTimeDifference(&startWatch,&tz2);
+        double time_duration = ms/1000.0;
+
+        int curr_sec = (int) time_duration;
+
+        if(curr_sec > last_sec)
+        {
+        	fprintf(plotFile, "%d		%d\n", curr_sec, current_buffer_level);
+        	last_sec = curr_sec;
+        }
+        fprintf(logFile, "PACK HANDLER | Time: %lf sec | current_buffer_level: %d  \n", time_duration, current_buffer_level);
     }
 }
 
@@ -215,7 +257,6 @@ void report_statistics(int Q_star, int Q_t, int tau)
     strcat(statistic, third);
     strcat(statistic, " ");
 
-    printf("Statistic %s \n ", statistic);
     // send the message over
     send_socket_data(sfd, statistic, server_to_transact_with);
 }
@@ -231,13 +272,14 @@ int main(int argc, char **argv) {
     char * buf_sz;
     char * target_buf;
     char * logfile_c;
+    char * plotfile_c;
     char * filename; 
 
     char buf[BUFSIZE];
 
     /* check command line arguments */
     if (argc != 11) {
-     fprintf(stderr,"usage: %s server-ip server-tcp-port client-udp-port payload-size playback-del gamm_r buf-sz target-buf logfile-c filename(short or long)\n", argv[0]);
+     fprintf(stderr,"usage: %s server-ip server-tcp-port client-udp-port payload-size playback-del gamma buf-sz target-buf logfile-c filename(short or long)\n", argv[0]);
      exit(0);
     }
     hostname = argv[1];
@@ -254,6 +296,7 @@ int main(int argc, char **argv) {
     target_buf_sz = atoi(target_buf);
     logfile_c = argv[9];
     filename = argv[10];
+    plotfile_c = "client.dat";
     /* socket: create the socket */
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) 
@@ -312,7 +355,6 @@ int main(int argc, char **argv) {
     n = read(sockfd, buf, BUFSIZE);
     if (n < 0) 
         error("ERROR reading from socket");
-    //printf("Echo from server: %s\n", buf);
     close(sockfd);
 
     // decode the message
@@ -345,25 +387,40 @@ int main(int argc, char **argv) {
         // semaphore to protect the shared_buffer
         sem_init(&full, SHARED, 0);   /* sem full = 0 , shared between threads of same process */
 
-        /* open the file */
+        /* open the log file */
         logFile = fopen(logfile_c, "wb");
+
+
+        // open the plot file
+        plotFile = fopen(plotfile_c, "wb");
+
+
         if (logFile == NULL) {
             printf("I couldn't open logfile_c for appending.\n");
             exit(0);
         }
 
-        playing = true;
+        transmitting = true;
         current_buffer_level = 0;
-        //printf("Here \n");
-        printf("Now sleep %d\n", pl_del);
+        printf("Buffering..  \n");
         nsleep((long) pl_del-1);
-        printf("Now wake up\n");
+        printf("Now playing %s \n", filename);
+
+        plot_time = -1;
         do_sleep_alarm(1);
-        while(playing)
+        while(transmitting)
         {
         	do_sleep_alarm(gamm_r);
         }
+        while(!transmitting && current_buffer_level > 0)
+        {
+        	// Finish it up
+        	do_sleep_alarm(gamm_r);
+        }
+        fclose(logFile);
+        fclose(plotFile);
         close_audio(audio_fd);
+        audio_fd = -1;
         sem_close(&full);
         sem_destroy(&full);
 }
@@ -409,8 +466,6 @@ int create_socket_to_listen_on(char *rand_port)
     return sd;
 }
 
-
-
 size_t send_socket_data(int in_fd, char * message, struct sockaddr * server_addr)
 {
     size_t numSent;
@@ -420,7 +475,6 @@ size_t send_socket_data(int in_fd, char * message, struct sockaddr * server_addr
     numSent = sendto(in_fd, message, strlen(message) , 0, who_to_send_addr, addr_len);
     return numSent;
 }
-
 size_t recv_socket_data(int in_fd, char * buffer)
 {
     struct sockaddr_in from;

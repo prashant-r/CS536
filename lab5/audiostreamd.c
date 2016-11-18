@@ -25,8 +25,14 @@
 #define MAX_BUF 1000
 #define MAX_WAITING_CLIENTS 10
 
+
+// sample execution
+
+// ./audiostreamd.o 6554 5665 250 90 3 logfile-s
+
 FILE *file;
 FILE *logFile;
+FILE *plotFile;
 size_t nread;
 struct sockaddr_in * client_to_transact_with;
 int sock_fd;
@@ -49,9 +55,8 @@ size_t recv_socket_data(int in_fd, char * buffer);
 void do_sleep_alarm(long time);
 void packet_transfer();
 typedef enum {BUSY, READY} STATES;
-
 volatile STATES state = READY;
-
+int last_sec =-1;
 void handle_sigchld(int sig) {
 	int saved_errno = errno;
 	while (waitpid((pid_t)(-1), 0, WNOHANG) > 0) {}
@@ -89,11 +94,17 @@ void packet_transfer() {
 			}
 			long ms = getTimeDifference(&tv1,&tz2);
 			double time_duration = ms/1000.0;
+			int curr_sec = (int) time_duration;
+			if(curr_sec > last_sec)
+			{
+			    fprintf(plotFile, "%d		%d\n", curr_sec, pktSpcing);
+			    last_sec = curr_sec;
+		    }
 			fprintf(logFile, "Time: %lf sec | Packet Spacing: %d  \n", time_duration, pktSpcing);
 		}
 		else
 		{
-			printf("Done \n");
+			//printf("Done \n");
 
 			size_t numSent;
 			struct sockaddr recv_sock;
@@ -135,7 +146,7 @@ void handle_sigpoll(int sig){
 	char * client_q_r = strtok(NULL, " ");
 	char * client_tau_r = strtok( NULL, " ");
 	
-	printf("Congestion control called %s %s %s %s %s \n", client_command_r, client_q_star_r, client_q_r, client_tau_r);
+	//printf("Congestion control called %s %s %s %s %s \n", client_command_r, client_q_star_r, client_q_r, client_tau_r);
 
 	if(*client_command_r == 'Q')
 	{
@@ -144,10 +155,9 @@ void handle_sigpoll(int sig){
 		int q_star = atoi(client_q_star_r);
 		int tau = atoi(client_tau_r);
 		int a = 1;
-		double delta = 0.30;
-		double epsilon = 0.0139;
-		double beta = 0.5;
-		printf("Bef pcktSpcing %d \n", pktSpcing);
+		double delta = 0.75;
+		double epsilon = 0.00015;
+		double beta = 0.005;
 		if(mode == 0)
 		{
 			if(qt == q_star)
@@ -165,14 +175,14 @@ void handle_sigpoll(int sig){
 		}
 		else if(mode == 1)
 		{
+
 			if(qt == q_star)
 			{
 				pktSpcing = pktSpcing *1;
 			}
 			else if(qt < q_star)
 			{
-				pktSpcing = delta * pktSpcing;
-
+				pktSpcing = (double) pktSpcing * (double) delta;
 			}
 			else
 			{
@@ -181,16 +191,15 @@ void handle_sigpoll(int sig){
 		}
 		else if(mode == 2)
 		{
-			pktSpcing = pktSpcing - epsilon * (q_star - qt);
+			pktSpcing = (int) ((double) pktSpcing - epsilon * (q_star - qt));
 		}
 		else if(mode == 3)
 		{
-			pktSpcing = pktSpcing - ((epsilon*(q_star - qt)) - beta * (pktSpcing - tau));
+			pktSpcing = (int) ((double) pktSpcing - (double) (epsilon*(q_star - qt)) + (double) beta * tau);
 		}
-
-		printf("Aft pcktSpcing %d \n", pktSpcing);
 		if(pktSpcing <= 0 ) pktSpcing =5;
 		if(pktSpcing >= 1000) pktSpcing = 999;
+
 	}
 	errno = saved_errno;
 }
@@ -340,6 +349,11 @@ void registration_proc(int sockfd, char * logfileS, char* udpPort, char* payload
 		printf("I couldn't open logfile_s for appending.\n");
 		exit(0);
 	}
+
+
+	// open/ create the server plot file
+
+	plotFile = fopen("server.dat", "wb");
 	/* 
    	 * listen: make this socket ready to accept connection requests 
    	 */
@@ -406,8 +420,8 @@ void registration_proc(int sockfd, char * logfileS, char* udpPort, char* payload
 			strcat(okport,udpPort);
 			strcpy(portbuf, okport);
 			n = write(childfd, portbuf, strlen(portbuf));
-			char *mode = "r";
-			file = fopen(client_path_r, mode);
+			char *mode_f = "r";
+			file = fopen(client_path_r, mode_f);
 			if (n < 0) 
 				error("ERROR writing to socket");
 		} else {
@@ -451,6 +465,7 @@ void handle_child_request(FILE * logfileS, char* udpPort, char* payloadSize, cha
 		perror("resettimeofday: gettimeofday");
 		exit(-1);
 	}
+	//printf("State is %s \n", getStateName(state));
 	while(state != READY)
 	{
 
@@ -460,7 +475,6 @@ void handle_child_request(FILE * logfileS, char* udpPort, char* payloadSize, cha
 	{
 		do_sleep_alarm(pktSpcing);
 	}
-	printf("Outta here \n");
 	if (-1 == gettimeofday(&tv2, NULL)) {
 		perror("resettimeofday: gettimeofday");
 		exit(-1);
@@ -469,6 +483,7 @@ void handle_child_request(FILE * logfileS, char* udpPort, char* payloadSize, cha
 	double time_duration = ms/1000.0;
 	printf("Completion time: %lf seconds\n", time_duration);
 	fclose(logfileS);
+	fclose(plotFile);
 }
 
 
