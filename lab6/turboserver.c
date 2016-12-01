@@ -12,6 +12,9 @@
 #include <sys/time.h>
 #include <stdbool.h>
 
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
+#define MAX(x, y) (((x) > (y)) ? (x) : (y))
+
 int portno;
 char *map;
 int fd;
@@ -38,16 +41,12 @@ bool nackhandle (int sockUDP, struct sockaddr_in from, socklen_t fromlen) {
     int n,i;
     bzero(buffer,256);
     int control[BLOCKSIZE];
-    printf("Entering UDP listner\n");
     while(1) {
-        printf("Waiting for UDP NACK...\n");
         bzero(control,BLOCKSIZE);
         /*n = read(sock,control,sizeof(control));
          if (n < 0) error("ERROR reading from socket");*/
         n = recvfrom(sockUDP,control,sizeof(control),0,(struct sockaddr *)&from,&fromlen);
         if (n < 0) error("ERROR in recieving NACK");
-        printf("NACK: %d\n",control[0]);
-        printf("NACK: \n");
         if (control[0] == -1) {
             printf("File Sent\n");
             return true;
@@ -69,19 +68,26 @@ bool nackhandle (int sockUDP, struct sockaddr_in from, socklen_t fromlen) {
                     sprintf(seqChar,"%8d",control[i]);
                     memcpy(sendData,seqChar,8);
                     memcpy(sendData+8,data,sizeof(data));
-                    printf("Sending sequence: %d\n",control[i]);
                     n = dropsendto(sockUDP,sendData,sizeof(sendData),(struct sockaddr *)&from,10,9);
                     if (n  < 0) error("sendto");
                 }
                 else{
-                    memcpy(data,&map[control[i]*BLOCKSIZE],finfo.st_size-((numPackets-1)*BLOCKSIZE));
+                    if(MAX(0,finfo.st_size-(control[i]*BLOCKSIZE)) == 0)
+                    {
+                        char dat[1];
+                        dat[0] = 'A'; 
+                        n = dropsendto(sockUDP,dat,0,(struct sockaddr *)&from,10,9);
+                        if (n  < 0) error("sendto");
+                    }
+                    else{
+                    memcpy(data,&map[control[i]*BLOCKSIZE],MAX(0,finfo.st_size-control[i]*BLOCKSIZE));
                     sprintf(seqChar,"%8d",control[i]);
                     memcpy(sendData,seqChar,8);
                     memcpy(sendData+8,data,sizeof(data));
-                    printf("Sending sequence: %d\n",control[i]);
                     n = dropsendto(sockUDP,sendData,sizeof(sendData),(struct sockaddr *)&from,10,9);
                     if (n  < 0) error("sendto");              
                     }
+                }
             }
             return false;
         }
@@ -218,13 +224,11 @@ int main(int argc, char *argv[]) {
     int fd;
     // If the secret keys match then continue onwards
 
-    printf("The RequestBuf is %s \n", requestBuf);
     if(strcmp(secretKey, secretKeyGiven ) == 0)
     {
         if(validateFile(filename) == true)
         {
 
-            printf("Made it here \n");
             char const * dir = "/tmp";
             char filePath[ 80 ] = { 0 };
             strcat(filePath, dir );
@@ -243,7 +247,6 @@ int main(int argc, char *argv[]) {
             bzero(buffer,256);
             sprintf(buffer, "%lld", (long long) finfo.st_size);
             //send file details
-            printf("Sending File Size: %s\n",buffer);
             client_to_transact_with = (struct sockaddr *)&from;
 
             unsigned long long int numbytes;
@@ -253,19 +256,17 @@ int main(int argc, char *argv[]) {
                 perror("sender: sendto");
                 return;
                 }
-                printf("sender: waiting for ACK from receiver\n");
-
+            
                 char ack_message[4];
                 int response_len = recv(sockfd, &ack_message, sizeof(ack_message), 0);
                 if (response_len >= 0) {
                     ack_message[3] = '\0';
-                    printf("sender: got %s\n", ack_message);
+                    //printf("sender: got %s\n", ack_message);
                     break;
                 }
                 else if (response_len == -1) {
                     perror("sender: receive ACK");
                 }
-                printf("sender: timeout, retrying.\n");
             }
 
             int n;
@@ -279,8 +280,7 @@ int main(int argc, char *argv[]) {
             socklen_t fromlen;
             fromlen = sizeof(struct sockaddr_in);
 
-            printf("Starting send\n");
-
+       
             map = (char*)mmap(0, finfo.st_size, PROT_READ, MAP_SHARED, fd, 0);
             if (map == MAP_FAILED) {
               close(fd);
@@ -288,8 +288,7 @@ int main(int argc, char *argv[]) {
           }    
           numPackets=((finfo.st_size + BLOCKSIZE -1)/BLOCKSIZE);
 
-          printf("Total numPackets %d \n", numPackets);
-
+         
           while (1) 
           {
 
@@ -310,20 +309,27 @@ int main(int argc, char *argv[]) {
                     sprintf(seqChar,"%8d",currSeq);
                     memcpy(sendData,seqChar,8);
                     memcpy(sendData+8,&map[currSeq*BLOCKSIZE],BLOCKSIZE);
-                    printf("Sending sequence: %d\n",currSeq);
-                    n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,10,9);
+                    n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,3,9);
                     if (n  < 0) error("sendto");
                     currSeq++;
                 }
-                else{ 
-                    printf("Sending the last packet\n");
+                else{
+                    if(MAX(0, finfo.st_size-(currSeq*BLOCKSIZE)) == 0)
+                    {
+                        n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,3,9);
+                        if (n  < 0) error("sendto last seq");
+                        currSeq++;
+                        
+                    } 
+                    else
+                    {
                     sprintf(seqChar,"%8d",currSeq);
                     memcpy(sendData,seqChar,8);
-                    memcpy(sendData+8,&map[currSeq*BLOCKSIZE],finfo.st_size-(currSeq*BLOCKSIZE));
-                    printf("Sending last sequence: %d\n",currSeq);
-                    n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,10,9);
+                    memcpy(sendData+8,&map[currSeq*BLOCKSIZE],MAX(0, finfo.st_size-(currSeq*BLOCKSIZE)));
+                    n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,3,9);
                     if (n  < 0) error("sendto last seq");
                     currSeq++;
+                    }
                 }
             }
             if(isFileSent)
@@ -331,36 +337,7 @@ int main(int argc, char *argv[]) {
                 if(nackhandle(sockUDP, server, fromlen))
                     break;
             }
-            }//end while
-          // Send the packets one by one of size BLOCKSIZE
-          // Compute the checksum of the file and add it to the end of the file later
-
-        //   int num_read = -1;
-        //   while((num_read = read(fd,buf,BLOCKSIZE)) > 0){
-
-        //     int x;
-        //     for(x =0 ; x < num_read; x++)
-        //     {
-        //         check_sum+= buf[x];
-        //     }
-        //     if(num_read==-1){
-        //         perror("failed to read file \n ");
-        //         return EXIT_FAILURE;
-        //     }
-        //          // Write out the characters
-        //     int num_written = write(fullAssocSockfd, buf, num_read);
-        //     if(num_written==-1){
-        //         perror("failed to write file to fullAssocSockfd \n");
-        //         return EXIT_FAILURE;
-        //     }
-        //     memset(&buf[0], 0, BLOCKSIZE);
-        // }
-        //      // convert checksum to big endian as per lab 1
-        // check_sum = htobe64(check_sum);
-        //      // write out the check sum 
-        // write(sockfd, (void *)&check_sum, 8);
-             // write out the 0 byte so as to signify end of transmission.
-            //write(sockfd, buf, 0);
+            }
             close(sockfd);
             exit(EXIT_SUCCESS);
         }
@@ -382,7 +359,6 @@ size_t dropsendto(int in_fd, char * message,int size, struct sockaddr * server_a
     }
     else if(packet_counter == totalnum)
     {
-        printf("Came here \n");
         if(loss_counter == lossnum)
         {
             packet_counter = 1;
@@ -398,6 +374,6 @@ size_t dropsendto(int in_fd, char * message,int size, struct sockaddr * server_a
     struct sockaddr recv_sock;
     socklen_t addr_len = sizeof(recv_sock);
     struct sockaddr * who_to_send_addr = server_addr;
-    numSent = sendto(in_fd, message, strlen(message) , 0, who_to_send_addr, addr_len);
+    numSent = sendto(in_fd, message, size , 0, who_to_send_addr, addr_len);
     return numSent;
 }

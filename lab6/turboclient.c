@@ -26,6 +26,7 @@ int create_socket_to_listen_on(char *rand_port);
 size_t send_socket_data(int in_fd, char * message, int size, struct sockaddr * server_addr);
 size_t recv_socket_data(int in_fd, char * buffer, int size);
 long getTimeDifference(struct timeval *t1 , struct timeval *t2);
+long long int RTT(struct timeval *t1 , struct timeval *t2);
 
 struct sockaddr_in * server_to_transact_with;
 
@@ -96,7 +97,7 @@ void validateFileName(char * filename) {
     strcat(filePath, filename);
     // Next, call access to check if the filepath is legal. If file exists balk. Else, its a new file download
     // so continue onwards.
-    printf("File name %s \n ", filePath);
+    //printf("File name %s \n ", filePath);
     if( access( filePath, F_OK ) == -1 ) {
         return;
     } else {
@@ -261,6 +262,17 @@ long getTimeDifference(struct timeval *t1 , struct timeval *t2)
     return milliseconds;
 }
 
+// Calculate the round trip time given two timevals
+// to a granularity of milliseconds
+long long int RTT(struct timeval *t1 , struct timeval *t2)
+{
+    struct timeval tv1 = *t1;
+    struct timeval tv2 = *t2;
+    long long int milliseconds;
+    milliseconds = (long long int) (tv2.tv_usec - tv1.tv_usec) / 1000;
+    milliseconds += (long long int) (tv2.tv_sec - tv1.tv_sec) *1000;
+    return milliseconds;
+}
 
 
 int start_turbo_client (int argc, char **argv) {
@@ -283,24 +295,20 @@ int start_turbo_client (int argc, char **argv) {
     // Write the request
     snprintf(sendBuffer, sizeof(sendBuffer), "%s", str);
 
-    printf("Hostname %s PortNumber %s \n", argv[1], argv[2]);
-
+    
     server.sin_family = AF_INET;
     struct hostent *hp, *gethostbyname();
     hp = gethostbyname(argv[1]);
     bcopy ( hp->h_addr, &(server.sin_addr.s_addr), hp->h_length);
     server.sin_port = htons(atoi(argv[2]));
     server_to_transact_with = &server;
-
-    printf("send buffer is %s \n", sendBuffer);
-    /* connect: create a connection with the server */
+     /* connect: create a connection with the server */
     if (connect(sockfd,(struct sockaddr *)&server, sizeof(server)) < 0) 
         error("ERROR connecting");
 
     if(send_socket_data(sockfd, sendBuffer, strlen(sendBuffer), (struct sockaddr *) &server) <0)
         error("Sending handshake connection set up");
 
-    printf("Sent handshake ! \n");
     // File descriptor for the file we are about to download and store.
     int fdw;
 
@@ -311,9 +319,7 @@ int start_turbo_client (int argc, char **argv) {
     int n = read(sockfd,buffer,255);
     if (n < 0)
         error("ERROR reading from socket");
-    printf("File Size: %s\n",buffer);
     char ack[] = "ACK";
-    printf("receiver: sending ACK packet to turboserver.\n");
     send_socket_data(sockfd, ack, strlen(ack), (struct sockaddr *) server_to_transact_with);
 
     if (-1 == gettimeofday(&startWatch, NULL)) {
@@ -387,7 +393,7 @@ int start_turbo_client (int argc, char **argv) {
         memcpy(seqC,recvData,8);
         int seq=atoi(seqC);
         if(pktsRcvd[seq]==0){
-            printf("Sequence Received %d\n",seq);
+            //printf("Sequence Received %d\n",seq);
             numPackets++;
             pktsRcvd[seq]=1;
             memcpy(data,recvData+8,sizeof(recvData)-8);
@@ -396,21 +402,21 @@ int start_turbo_client (int argc, char **argv) {
                 //fseek(f,seq*1024,SEEK_SET);
                 //fwrite(data,sizeof(data),1,f);
             if (seq < totPkts-1){
-                printf("Received size is %ld\n", recvSize );
+              //  printf("Received size is %ld\n", recvSize );
                 memcpy(&map[seq*BLOCKSIZE],data,sizeof(data));
                 recvSize+=sizeof(data);
             }
             else{
-                printf("Received size is %ld\n", recvSize );
-                printf("Writing last packet\n");
+                //printf("Received size is %ld\n", recvSize );
+                //printf("Writing last packet\n");
                 memcpy(&map[seq*BLOCKSIZE],data,fileSize-((seq)*BLOCKSIZE));
                 recvSize+=(fileSize-((seq)*BLOCKSIZE));
             }
-            printf("Received size is | file size is %ld %ld \n", recvSize, fileSize);
-            printf("Number of bytes: %ld\n",sizeof(data));
+            //printf("Received size is | file size is %ld %ld \n", recvSize, fileSize);
+            //printf("Number of bytes: %ld\n",sizeof(data));
             if(recvSize>=fileSize)
             {
-                printf("It's been got \n");
+                printf("File has been received :) \n");
                 int final[1];
                 final[0] = -1;
                 n = sendto(sockfd,final,sizeof(final),0,(struct sockaddr *)&from, length);
@@ -419,38 +425,34 @@ int start_turbo_client (int argc, char **argv) {
                 if (n < 0) error("ERROR sending final packet");
                     n = sendto(sockfd,final,sizeof(final),0,(struct sockaddr *)&from, length);
                 if (n < 0) error("ERROR sending final packet");
-                    break;
 
                 if (-1 == gettimeofday(&stopWatch, NULL)) {
                     perror("resettimeofday: gettimeofday");
                     goto EXIT_FAILURE_CODE;
                 }
-                if(validateCheckSum(argv[4]))
-                {
-                    long long int time_taken = RTT(&startWatch, &stopWatch);
-                    double completion = time_taken/1000.0;
-                    printf("<- <- <- Generated Report -> -> -> \n ");
-                    printf("Number of bytes transfered : %d Bytes\n", totalNumReadBytes);
-                    printf("Completion Time : %lf seconds \n", completion);
-                    printf("Reliable Throughput : %lf MBps \n" , (totalNumReadBytes/(1000000.0*completion)));
-                    printf("File received\n");
-                    printf("Filesize: %ld\n", fileSize);
-                    printf("Recv size: %ld\n", recvSize);
+                long long int time_taken = RTT(&startWatch, &stopWatch);
+                double completion = time_taken/1000.0;
+                printf("<- <- <- Generated Report -> -> -> \n ");
+                printf("Completion Time : %lf seconds \n", completion);
+                printf("Reliable Throughput : %lf MBps \n" , (totalNumReadBytes/(1000000.0*completion)));
+                printf("File received\n");
+                printf("Filesize: %ld\n", fileSize);
+                printf("Recv size: %ld\n", recvSize);
                     //printf("Total Nack packets: %d\n",nackCounter);
 
-                    printf("Total Nack packets: %d\n",nackCounter);
+                printf("Total Nack packets: %d\n",nackCounter);
                     //fclose(f);
-                    if (munmap(map, fileSize) == -1) {
-                        error("munmap");
+                if (munmap(map, fileSize) == -1) {
+                    error("munmap");
 
-                        }
-                    close(fd);
-                    }
+                }
+                close(fd);
+                break;
                 }
             }
         }
         else {
-                printf("Number of bytes rxed: %ld\n",recvSize);
+                //printf("Number of bytes rxed: %ld\n",recvSize);
                 //printf("Entering timeout loop");
                 int control[BLOCKSIZE];
                 memset(control, -2, BLOCKSIZE);
@@ -460,17 +462,13 @@ int start_turbo_client (int argc, char **argv) {
                 //bzero(control,512);
                 for(j=0;j<totPkts;j++) {
                     if(pktsRcvd[j]==0) {
-                        printf("Sending NACK:%d\n",j);
+                        //printf("Sending NACK:%d\n",j);
                         control[num] = j;
                         num++;
                         reqs++;
                         if(reqs==BLOCKSIZE) {
                             nackCounter++;
                             num=0;
-                        /*n = write(sockfd,control,sizeof(control));
-                         if (n < 0)
-                         error("ERROR writing to socket");
-                         */
                             n = sendto(sockfd,control,sizeof(control),0,(struct sockaddr *)&from, length);
                             if (n < 0) error("NACK sendto error");
 
@@ -487,9 +485,6 @@ int start_turbo_client (int argc, char **argv) {
                     if(num>0)
                     {
                         nackCounter++;
-                        /*   n = write(sockfd,control,sizeof(control));
-                        if (n < 0)
-                        error("ERROR writing to socket");*/
                         n = sendto(sockfd,control,sizeof(control),0,(struct sockaddr *)&from, length);
                         if (n < 0) error("NACK sendto error");
                 
