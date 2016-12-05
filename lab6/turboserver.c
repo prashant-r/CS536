@@ -15,6 +15,16 @@
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 
+FILE *f;
+#define DEBUG 1
+
+#ifdef DEBUG
+#define DEBUG_PRINT(...) do{ fprintf(f, __VA_ARGS__ ); } while( false )
+#else
+#define DEBUG_PRINT(...) do{ } while ( false )
+#endif
+
+
 int portno;
 char *map;
 int fd;
@@ -55,19 +65,21 @@ bool nackhandle (int sockUDP, struct sockaddr_in from, socklen_t fromlen) {
 
             char seqC[8];
             char data[BLOCKSIZE];
-            char sendData[BLOCKSIZE];
+            char sendData[BLOCKSIZE + 8];
             char seqChar[9];
             for(i=0;i<BLOCKSIZE;i++){
                 //printf("control [i] is %d \n", control[i]);
+                bzero(data, BLOCKSIZE);
+                bzero(sendData, BLOCKSIZE);
                 if(control[i] <0)
                 {
                     break;
                 }
                 if (control[i] < numPackets-1){
                     memcpy(data,&map[control[i]*BLOCKSIZE],BLOCKSIZE);
-                    sprintf(seqChar,"%8d",control[i]);
+                    sprintf(seqChar,"%7d|",control[i]);
                     memcpy(sendData,seqChar,8);
-                    memcpy(sendData+8,data,sizeof(data));
+                    memcpy(sendData+8,data,BLOCKSIZE);
                     n = dropsendto(sockUDP,sendData,sizeof(sendData),(struct sockaddr *)&from,10,9);
                     if (n  < 0) error("sendto");
                 }
@@ -81,9 +93,9 @@ bool nackhandle (int sockUDP, struct sockaddr_in from, socklen_t fromlen) {
                     }
                     else{
                     memcpy(data,&map[control[i]*BLOCKSIZE],MAX(0,finfo.st_size-control[i]*BLOCKSIZE));
-                    sprintf(seqChar,"%8d",control[i]);
+                    sprintf(seqChar,"%7d|",control[i]);
                     memcpy(sendData,seqChar,8);
-                    memcpy(sendData+8,data,sizeof(data));
+                    memcpy(sendData+8,data,BLOCKSIZE);
                     n = dropsendto(sockUDP,sendData,sizeof(sendData),(struct sockaddr *)&from,10,9);
                     if (n  < 0) error("sendto");              
                     }
@@ -199,7 +211,12 @@ int create_socket_to_listen_on(char *rand_port)
 struct sockaddr * client_to_transact_with;
 
 int main(int argc, char *argv[]) {
-
+    f =  fopen("turboclient.txt", "w+");
+    if (f == NULL)
+    {
+        printf("Error opening file!\n");
+        exit(1);
+    }
     validateCommandLineArguments(argc, argv);
     char * secretKeyGiven = argv[2];
     int sockfd = create_socket_to_listen_on(argv[1]);
@@ -297,7 +314,7 @@ int main(int argc, char *argv[]) {
             long int i;
             for(i=0;i<size;i++) {
                 char data[BLOCKSIZE];
-                char sendData[BLOCKSIZE];
+                char sendData[BLOCKSIZE + 8];
                 char seqChar[9];
                 if(currSeq == numPackets+1)
                 {
@@ -306,7 +323,7 @@ int main(int argc, char *argv[]) {
                 }
 
                 if (currSeq < numPackets){ //all packets except the last packet
-                    sprintf(seqChar,"%8d",currSeq);
+                    sprintf(seqChar,"%7d|",currSeq);
                     memcpy(sendData,seqChar,8);
                     memcpy(sendData+8,&map[currSeq*BLOCKSIZE],BLOCKSIZE);
                     n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,3,9);
@@ -323,7 +340,7 @@ int main(int argc, char *argv[]) {
                     } 
                     else
                     {
-                    sprintf(seqChar,"%8d",currSeq);
+                    sprintf(seqChar,"%7d|",currSeq);
                     memcpy(sendData,seqChar,8);
                     memcpy(sendData+8,&map[currSeq*BLOCKSIZE],MAX(0, finfo.st_size-(currSeq*BLOCKSIZE)));
                     n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,3,9);
@@ -347,6 +364,7 @@ int main(int argc, char *argv[]) {
         printf("Secret Key Mismatch Given Key : %s | Expected Key : %s \n", secretKeyGiven, secretKey);
     }
     close(sockfd);
+    fclose(f);
     exit(EXIT_SUCCESS);
 
 }
@@ -374,6 +392,7 @@ size_t dropsendto(int in_fd, char * message,int size, struct sockaddr * server_a
     struct sockaddr recv_sock;
     socklen_t addr_len = sizeof(recv_sock);
     struct sockaddr * who_to_send_addr = server_addr;
+    DEBUG_PRINT("\n -------------- The message sent was-------------------- \n %s", message);
     numSent = sendto(in_fd, message, size , 0, who_to_send_addr, addr_len);
     return numSent;
 }

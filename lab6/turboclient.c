@@ -13,7 +13,15 @@
 #include <stdbool.h>
 #include <netdb.h>
 
+FILE *f;
 
+#define DEBUG 1
+
+#ifdef DEBUG
+#define DEBUG_PRINT(...) do{ fprintf( f, __VA_ARGS__ ); } while( false )
+#else
+#define DEBUG_PRINT(...) do{ } while ( false )
+#endif
 uint32_t BLOCKSIZE = -1;
 
 int start_turbo_server();
@@ -379,6 +387,8 @@ int start_turbo_client (int argc, char **argv) {
     
     while(1) {
 
+        bzero(recvData, BLOCKSIZE + 8);
+        bzero(data, BLOCKSIZE);
         //wait fro recvfrom or timeout
         FD_ZERO(&readfds);
         FD_SET(sockfd, &readfds);
@@ -387,7 +397,7 @@ int start_turbo_client (int argc, char **argv) {
         
         //if (FD_ISSET(sockUDP, &readfds)) {
         if(setRet > 0 ){
-        n = recvfrom(sockfd,recvData,BLOCKSIZE,0,(struct sockaddr *)&from, (socklen_t*)&length);
+        n = recvfrom(sockfd,recvData,BLOCKSIZE + 8,0,(struct sockaddr *)&from, (socklen_t*)&length);
         if (n < 0) error("recvfrom");
         char seqC[8];
         memcpy(seqC,recvData,8);
@@ -396,7 +406,14 @@ int start_turbo_client (int argc, char **argv) {
             //printf("Sequence Received %d\n",seq);
             numPackets++;
             pktsRcvd[seq]=1;
-            memcpy(data,recvData+8,sizeof(recvData)-8);
+            char * pch = recvData;
+            while(pch!=NULL)
+            {
+                if(*pch == '|') break;
+                pch = pch+1;
+            }
+            memcpy(data,pch+1,BLOCKSIZE);
+            DEBUG_PRINT("\n What i received was %s \n", recvData);
                 //printf("seq num: %d\n", seq);
 
                 //fseek(f,seq*1024,SEEK_SET);
@@ -508,6 +525,14 @@ int start_turbo_client (int argc, char **argv) {
 
 int main(int argc, char *argv[])
 {
+    f =  fopen("turboclient.txt", "w+");
+    if (f == NULL)
+    {
+        printf("Error opening file!\n");
+        exit(1);
+    }
     validateCommandLineArguments(argc, argv);
-    return start_turbo_client(argc,argv);
+    int result = start_turbo_client(argc,argv);
+    fclose(f);
+    return result;
 }
