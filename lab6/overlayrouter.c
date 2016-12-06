@@ -30,7 +30,6 @@
 #define INTERVAL 50000
 #define MAX_BUF 1000
 #define MAX_PKT_LEN 8096
-#define KNOWNN_OVERLAY_PORT 8898
 
 volatile bool received = false;
 pid_t current_pid = -1 ;
@@ -67,7 +66,7 @@ int create_send_server_socket_data(int in_fd, char * hostname, char * hostUDPpor
 size_t send_socket_data(int in_fd, struct sockaddr * server_addr);
 int create_socket_to_listen_on(int *rand_port);
 void startTunnelServer(char* myUDPport);
-void registration_proc(int sockfd);
+void registration_proc(char * myUDPport, int sockfd);
 bool isValidIpAddress(char *ipAddress);
 void handle_sigchld(int sig);
 
@@ -134,14 +133,16 @@ void startTunnelServer(char* myUDPport)
 		return;
 	}
 	freeaddrinfo(servinfo);
-	registration_proc(sockfd);
+	registration_proc(myUDPport, sockfd);
 	exit(EXIT_SUCCESS);
 }
 
 
-void registration_proc(int sockfd)
+void registration_proc(char * myUDPport, int sockfd)
 {
 
+	int KNOWNN_OVERLAY_PORT = atoi(myUDPport);
+	if(KNOWNN_OVERLAY_PORT<=0) return;
 	struct sockaddr_storage their_addr;
 	socklen_t addr_len ;
 	addr_len = sizeof their_addr;
