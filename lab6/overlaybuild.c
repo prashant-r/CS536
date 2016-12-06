@@ -46,7 +46,7 @@ void validateCommandLineArguments(int argc, char ** argv)
 {
 	if(argc <= 5)
 	{
-		printf("\nERROR! (expected 3 , got %d) usage: %s dst-IP dst-port routerk-IP ... router2-IP router1-IP overlay-port build-port \n\n", argc, argv[0]);
+		printf("\nERROR! (expected 5 , got %d) usage: %s dst-IP dst-port routerk-IP ... router2-IP router1-IP overlay-port build-port \n\n", argc, argv[0]);
 		exit(1);
 	}
 }
@@ -101,23 +101,28 @@ int sendMyTunnelRequest(int argc, char ** argv)
 		strcat(str, "$");
 	}
 	char * hostname;
-	int port;
+	char * port;
 	if(num_forwards == 0)
 	{
 		hostname = dst_host;
-		port = atoi(dst_port);
+		port = dst_port;
 	}
 	else
 	{
-		hostname = argv[argc-1];
+		hostname = argv[argc-3];
+		port = argv[argc-2];
 	}
 	char * overlay_port  = argv[argc-2];
 	char * build_port = argv[argc-1];
 
+	//printf("overlay_port is %s \n", overlay_port);
+	//printf("build port is %s \n", build_port);
 	// create the payload
-	printf("Payload is %s \n", str);
+	//printf("Payload is %s \n", str);
+	//printf("Hostname is %s \n", hostname);
+	//printf("Port is %s\n", port);
 	
-	if ((rv = getaddrinfo(hostname, hostUDPport, &hints, &servinfo)) != 0) {
+	if ((rv = getaddrinfo(hostname, port, &hints, &servinfo)) != 0) {
 		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
 		return 2;
 	}
@@ -186,13 +191,22 @@ int sendMyTunnelRequest(int argc, char ** argv)
 	if(isnumber(recv_response ))
 	{
 		if(atoi(recv_response) == -1)
-			printf("Failure! Probable cause: invalid server host provided. \n");
+		{
+			printf("\nFailure! Probable cause: invalid server host provided. \n");
+		}
 		else
-			printf("Success! Make requests on port : %s\n", recv_response);
+			printf("\nSuccess! Make requests on port : %s\n", recv_response);
 	}
 	else
 	{
-		printf("Packet received was corrupt : %s\n", recv_response);
+		if(recv_response[0] == 'A')
+		{
+			printf("Route NOT established after 30 second wait. \n");
+		}
+		else
+		{
+			printf("Packet received was corrupt : %s\n", recv_response);
+		}
 	}
 	if (hostaddrp == NULL)
 		perror("ERROR on inet_ntoa\n");
