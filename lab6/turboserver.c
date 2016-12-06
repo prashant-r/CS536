@@ -16,7 +16,7 @@
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 
 FILE *f;
-#define DEBUG 1
+#define DEBUG 0
 
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf(f, __VA_ARGS__ ); } while( false )
@@ -25,6 +25,7 @@ FILE *f;
 #endif
 
 
+int LOSS_NUM;
 int portno;
 char *map;
 int fd;
@@ -80,7 +81,7 @@ bool nackhandle (int sockUDP, struct sockaddr_in from, socklen_t fromlen) {
                     sprintf(seqChar,"%7d|",control[i]);
                     memcpy(sendData,seqChar,8);
                     memcpy(sendData+8,data,BLOCKSIZE);
-                    n = dropsendto(sockUDP,sendData,sizeof(sendData),(struct sockaddr *)&from,10,9);
+                    n = dropsendto(sockUDP,sendData,sizeof(sendData),(struct sockaddr *)&from,1000,LOSS_NUM);
                     if (n  < 0) error("sendto");
                 }
                 else{
@@ -96,7 +97,7 @@ bool nackhandle (int sockUDP, struct sockaddr_in from, socklen_t fromlen) {
                     sprintf(seqChar,"%7d|",control[i]);
                     memcpy(sendData,seqChar,8);
                     memcpy(sendData+8,data,BLOCKSIZE);
-                    n = dropsendto(sockUDP,sendData,sizeof(sendData),(struct sockaddr *)&from,10,9);
+                    n = dropsendto(sockUDP,sendData,sizeof(sendData),(struct sockaddr *)&from,1000,LOSS_NUM);
                     if (n  < 0) error("sendto");              
                     }
                 }
@@ -110,9 +111,9 @@ bool nackhandle (int sockUDP, struct sockaddr_in from, socklen_t fromlen) {
 // Validates the command line arguments
 void validateCommandLineArguments(int argc, char * argv[])
 {
-    if(argc != 4)
+    if(argc != 5)
     {
-        printf("Check number of arguments (expected 3 , got %d) - Usage portnumber secretkey configfile.dat\n", argc);
+        printf("Check number of arguments (expected 3 , got %d) - Usage portnumber secretkey configfile.dat lossnum\n", argc);
         exit(1);
     }
     validateSecretKey(argv[2]);
@@ -220,7 +221,7 @@ int main(int argc, char *argv[]) {
     validateCommandLineArguments(argc, argv);
     char * secretKeyGiven = argv[2];
     int sockfd = create_socket_to_listen_on(argv[1]);
-
+    LOSS_NUM = atoi(argv[4]);
     char requestBuf[BUFSIZ];
     char buf[BLOCKSIZE];
 
@@ -269,7 +270,7 @@ int main(int argc, char *argv[]) {
             unsigned long long int numbytes;
             // loop for initial SYN/ACK 
             while(1) {
-                if ((numbytes = dropsendto(sockfd,buffer,sizeof buffer,client_to_transact_with, 10, 9)) == -1) {
+                if ((numbytes = dropsendto(sockfd,buffer,sizeof buffer,client_to_transact_with, 1000, LOSS_NUM)) == -1) {
                 perror("sender: sendto");
                 return;
                 }
@@ -326,14 +327,14 @@ int main(int argc, char *argv[]) {
                     sprintf(seqChar,"%7d|",currSeq);
                     memcpy(sendData,seqChar,8);
                     memcpy(sendData+8,&map[currSeq*BLOCKSIZE],BLOCKSIZE);
-                    n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,3,9);
+                    n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,1000,LOSS_NUM);
                     if (n  < 0) error("sendto");
                     currSeq++;
                 }
                 else{
                     if(MAX(0, finfo.st_size-(currSeq*BLOCKSIZE)) == 0)
                     {
-                        n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,3,9);
+                        n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,1000,LOSS_NUM);
                         if (n  < 0) error("sendto last seq");
                         currSeq++;
                         
@@ -343,7 +344,7 @@ int main(int argc, char *argv[]) {
                     sprintf(seqChar,"%7d|",currSeq);
                     memcpy(sendData,seqChar,8);
                     memcpy(sendData+8,&map[currSeq*BLOCKSIZE],MAX(0, finfo.st_size-(currSeq*BLOCKSIZE)));
-                    n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,3,9);
+                    n = dropsendto(sockUDP,sendData,sizeof(sendData),client_to_transact_with,1000,LOSS_NUM);
                     if (n  < 0) error("sendto last seq");
                     currSeq++;
                     }

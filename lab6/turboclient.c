@@ -15,7 +15,7 @@
 
 FILE *f;
 
-#define DEBUG 1
+#define DEBUG 0
 
 #ifdef DEBUG
 #define DEBUG_PRINT(...) do{ fprintf( f, __VA_ARGS__ ); } while( false )
