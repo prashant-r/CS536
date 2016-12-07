@@ -440,7 +440,6 @@ int start_turbo_client (int argc, char **argv) {
                 double completion = time_taken/1000.0;
                 printf("<- <- <- Generated Report -> -> -> \n ");
                 printf("Completion Time : %lf seconds \n", completion);
-                printf("Reliable Throughput : %lf MBps \n" , (totalNumReadBytes/(1000000.0*completion)));
                 printf("File received\n");
                 printf("Filesize: %ld\n", fileSize);
                 printf("Recv size: %ld\n", recvSize);
