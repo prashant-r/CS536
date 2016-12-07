@@ -13,15 +13,6 @@
 #include <stdbool.h>
 #include <netdb.h>
 
-FILE *f;
-
-#define DEBUG 0
-
-#ifdef DEBUG
-#define DEBUG_PRINT(...) do{ fprintf( f, __VA_ARGS__ ); } while( false )
-#else
-#define DEBUG_PRINT(...) do{ } while ( false )
-#endif
 uint32_t BLOCKSIZE = -1;
 
 int start_turbo_server();
@@ -289,10 +280,9 @@ int start_turbo_client (int argc, char **argv) {
     struct timeval startWatch;
     struct timeval stopWatch;
     //udp setup
-    int length;
-    socklen_t fromlen;
     struct sockaddr_in server;
     struct sockaddr_in from;
+    socklen_t fromlen = sizeof(from);
     char buf[1024];
     int sockfd = create_socket_to_listen_on(argv[1]);
     // Construct message
@@ -397,7 +387,7 @@ int start_turbo_client (int argc, char **argv) {
         
         //if (FD_ISSET(sockUDP, &readfds)) {
         if(setRet > 0 ){
-        n = recvfrom(sockfd,recvData,BLOCKSIZE + 8,0,(struct sockaddr *)&from, (socklen_t*)&length);
+        n = recvfrom(sockfd,recvData,BLOCKSIZE + 8,0,(struct sockaddr *)&from, &fromlen);
         if (n < 0) error("recvfrom");
         char seqC[8];
         memcpy(seqC,recvData,8);
@@ -413,7 +403,6 @@ int start_turbo_client (int argc, char **argv) {
                 pch = pch+1;
             }
             memcpy(data,pch+1,BLOCKSIZE);
-            DEBUG_PRINT("\n What i received was %s \n", recvData);
                 //printf("seq num: %d\n", seq);
 
                 //fseek(f,seq*1024,SEEK_SET);
@@ -436,11 +425,11 @@ int start_turbo_client (int argc, char **argv) {
                 printf("File has been received :) \n");
                 int final[1];
                 final[0] = -1;
-                n = sendto(sockfd,final,sizeof(final),0,(struct sockaddr *)&from, length);
+                n = sendto(sockfd, final, sizeof(final),0,(struct sockaddr *)&from, fromlen);
                 if (n < 0) error("ERROR sending final packet");
-                    n = sendto(sockfd,final,sizeof(final),0,(struct sockaddr *)&from, length);
+                n = sendto(sockfd, final, sizeof(final),0,(struct sockaddr *)&from, fromlen);
                 if (n < 0) error("ERROR sending final packet");
-                    n = sendto(sockfd,final,sizeof(final),0,(struct sockaddr *)&from, length);
+                n = sendto(sockfd, final, sizeof(final),0,(struct sockaddr *)&from, fromlen);
                 if (n < 0) error("ERROR sending final packet");
 
                 if (-1 == gettimeofday(&stopWatch, NULL)) {
@@ -486,10 +475,10 @@ int start_turbo_client (int argc, char **argv) {
                         if(reqs==BLOCKSIZE) {
                             nackCounter++;
                             num=0;
-                            n = sendto(sockfd,control,sizeof(control),0,(struct sockaddr *)&from, length);
+                            n = sendto(sockfd,control,sizeof(control),0,(struct sockaddr *)&from, fromlen);
                             if (n < 0) error("NACK sendto error");
 
-                            n = sendto(sockfd,control,sizeof(control),0,(struct sockaddr *)&from, length);
+                            n = sendto(sockfd,control,sizeof(control),0,(struct sockaddr *)&from, fromlen);
                             if (n < 0) error("NACK sendto error");
 
                             break;
@@ -502,10 +491,10 @@ int start_turbo_client (int argc, char **argv) {
                     if(num>0)
                     {
                         nackCounter++;
-                        n = sendto(sockfd,control,sizeof(control),0,(struct sockaddr *)&from, length);
+                        n = sendto(sockfd,control,sizeof(control),0,(struct sockaddr *)&from, fromlen);
                         if (n < 0) error("NACK sendto error");
                 
-                        n = sendto(sockfd,control,sizeof(control),0,(struct sockaddr *)&from, length);
+                        n = sendto(sockfd,control,sizeof(control),0,(struct sockaddr *)&from, fromlen);
                         if (n < 0) error("NACK sendto error");
                     }
                 
@@ -525,14 +514,7 @@ int start_turbo_client (int argc, char **argv) {
 
 int main(int argc, char *argv[])
 {
-    f =  fopen("turboclient.txt", "w+");
-    if (f == NULL)
-    {
-        printf("Error opening file!\n");
-        exit(1);
-    }
     validateCommandLineArguments(argc, argv);
     int result = start_turbo_client(argc,argv);
-    fclose(f);
     return result;
 }

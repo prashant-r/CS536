@@ -15,16 +15,6 @@
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 
-FILE *f;
-#define DEBUG 0
-
-#ifdef DEBUG
-#define DEBUG_PRINT(...) do{ fprintf(f, __VA_ARGS__ ); } while( false )
-#else
-#define DEBUG_PRINT(...) do{ } while ( false )
-#endif
-
-
 int LOSS_NUM;
 int portno;
 char *map;
@@ -212,12 +202,6 @@ int create_socket_to_listen_on(char *rand_port)
 struct sockaddr * client_to_transact_with;
 
 int main(int argc, char *argv[]) {
-    f =  fopen("turboclient.txt", "w+");
-    if (f == NULL)
-    {
-        printf("Error opening file!\n");
-        exit(1);
-    }
     validateCommandLineArguments(argc, argv);
     char * secretKeyGiven = argv[2];
     int sockfd = create_socket_to_listen_on(argv[1]);
@@ -365,7 +349,6 @@ int main(int argc, char *argv[]) {
         printf("Secret Key Mismatch Given Key : %s | Expected Key : %s \n", secretKeyGiven, secretKey);
     }
     close(sockfd);
-    fclose(f);
     exit(EXIT_SUCCESS);
 
 }
@@ -393,7 +376,6 @@ size_t dropsendto(int in_fd, char * message,int size, struct sockaddr * server_a
     struct sockaddr recv_sock;
     socklen_t addr_len = sizeof(recv_sock);
     struct sockaddr * who_to_send_addr = server_addr;
-    DEBUG_PRINT("\n -------------- The message sent was-------------------- \n %s", message);
     numSent = sendto(in_fd, message, size , 0, who_to_send_addr, addr_len);
     return numSent;
 }
